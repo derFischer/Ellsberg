@@ -14,7 +14,9 @@
 
 package types
 
-import "strconv"
+import (
+	"strconv"
+)
 
 // ID represents a generic identifier which is canonically
 // stored as a uint64 but is typically represented as a
@@ -37,3 +39,12 @@ type IDSlice []ID
 func (p IDSlice) Len() int           { return len(p) }
 func (p IDSlice) Less(i, j int) bool { return uint64(p[i]) < uint64(p[j]) }
 func (p IDSlice) Swap(i, j int)      { p[i], p[j] = p[j], p[i] }
+
+//id to uint64
+func IDToUINT (a []ID) []uint64 {
+	res := make([]uint64, len(a))
+	for i, id := range a {
+		res[i] = uint64(id)
+	}
+	return res
+}

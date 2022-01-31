@@ -30,6 +30,7 @@ import (
 	"go.etcd.io/etcd/v3/mvcc"
 	"go.etcd.io/etcd/v3/pkg/traceutil"
 	"go.etcd.io/etcd/v3/raft"
+	"go.etcd.io/etcd/v3/simulationpb"
 
 	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
@@ -100,6 +101,7 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 
 	var resp *pb.RangeResponse
 	var err error
+
 	defer func(start time.Time) {
 		warnOfExpensiveReadOnlyRangeRequest(s.getLogger(), start, r, resp, err)
 		if resp != nil {
@@ -110,6 +112,9 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 		}
 		trace.LogIfLong(traceThreshold)
 	}(time.Now())
+
+	//reply checker
+	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: false, Type: simulationpb.ClientMsg, Msg: r})
 
 	if !r.Serializable {
 		err = s.linearizableReadNotify(ctx)
@@ -127,15 +132,19 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 		err = serr
 		return nil, err
 	}
+	//check reply here
+	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: true, Type: simulationpb.ClientMsg, Msg: resp})
 	return resp, err
 }
 
 func (s *EtcdServer) Put(ctx context.Context, r *pb.PutRequest) (*pb.PutResponse, error) {
+	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: false, Type: simulationpb.ClientMsg, Msg: r})
 	ctx = context.WithValue(ctx, traceutil.StartTimeKey, time.Now())
 	resp, err := s.raftRequest(ctx, pb.InternalRaftRequest{Put: r})
 	if err != nil {
 		return nil, err
 	}
+	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: true, Type: simulationpb.ClientMsg, Msg: resp})
 	return resp.(*pb.PutResponse), nil
 }
 

@@ -62,6 +62,8 @@ import (
 	"go.etcd.io/etcd/v3/pkg/wait"
 	"go.etcd.io/etcd/v3/raft"
 	"go.etcd.io/etcd/v3/raft/raftpb"
+	"go.etcd.io/etcd/v3/simulation"
+	"go.etcd.io/etcd/v3/simulationpb"
 	"go.etcd.io/etcd/v3/version"
 	"go.etcd.io/etcd/v3/wal"
 )
@@ -195,6 +197,10 @@ type EtcdServer struct {
 
 	consistIndex cindex.ConsistentIndexer // consistIndex is used to get/set/save consistentIndex
 	r            raftNode                 // uses 64-bit atomics; keep 64-bit aligned.
+	sl           *simulation.Simulation
+
+	//simulation msg chan
+	SLmsg chan simulationpb.Msg
 
 	readych chan struct{}
 	Cfg     ServerConfig
@@ -477,6 +483,10 @@ func NewServer(cfg ServerConfig) (srv *EtcdServer, err error) {
 	lstats := stats.NewLeaderStats(cfg.Logger, id.String())
 
 	heartbeat := time.Duration(cfg.TickMs) * time.Millisecond
+
+	sl := simulation.StartSimulationServer(uint64(id), types.IDToUINT(cl.MemberIDs()))
+	n.SetMsgCh(sl.MsgCh)
+
 	srv = &EtcdServer{
 		readych:     make(chan struct{}),
 		Cfg:         cfg,
@@ -495,6 +505,8 @@ func NewServer(cfg ServerConfig) (srv *EtcdServer, err error) {
 				storage:     NewStorage(w, ss),
 			},
 		),
+		sl:               sl,
+		SLmsg:            sl.MsgCh,
 		id:               id,
 		attributes:       membership.Attributes{Name: cfg.Name, ClientURLs: cfg.ClientURLs.StringSlice()},
 		cluster:          cl,
@@ -829,6 +841,11 @@ func (s *EtcdServer) Process(ctx context.Context, m raftpb.Message) error {
 	if m.Type == raftpb.MsgApp {
 		s.stats.RecvAppendReq(types.ID(m.From).String(), m.Size())
 	}
+	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: false, Type: simulationpb.RaftMsg, Msg: m})
+	// if (m.Type != raftpb.MsgHeartbeat) && (m.Type != raftpb.MsgHeartbeatResp) {
+	// 	log.Printf("simulation receives raft msg: %+v\n", m)
+	// 	s.sl.Dump()
+	// }
 	return s.r.Step(ctx, m)
 }
 

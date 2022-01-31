@@ -20,15 +20,19 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"go.etcd.io/etcd/v3/etcdserver/etcdserverpb"
+
 	"go.etcd.io/etcd/v3/raft/confchange"
 	"go.etcd.io/etcd/v3/raft/quorum"
 	pb "go.etcd.io/etcd/v3/raft/raftpb"
 	"go.etcd.io/etcd/v3/raft/tracker"
+	"go.etcd.io/etcd/v3/simulationpb"
 )
 
 // None is a placeholder node ID used when there is no leader.
@@ -318,6 +322,9 @@ type raft struct {
 	step stepFunc
 
 	logger Logger
+
+	//simulation
+	SLmsg chan simulationpb.Msg
 }
 
 func newRaft(c *Config) *raft {
@@ -385,6 +392,8 @@ func newRaft(c *Config) *raft {
 	return r
 }
 
+func (r *raft) setMsgCh(mch chan simulationpb.Msg) { r.SLmsg = mch }
+
 func (r *raft) hasLeader() bool { return r.lead != None }
 
 func (r *raft) softState() *SoftState { return &SoftState{Lead: r.lead, RaftState: r.state} }
@@ -399,6 +408,7 @@ func (r *raft) hardState() pb.HardState {
 
 // send persists state to stable storage and then sends to its mailbox.
 func (r *raft) send(m pb.Message) {
+	simulationpb.Sending(r.SLmsg, simulationpb.Msg{Send: true, Type: simulationpb.RaftMsg, Msg: m})
 	if m.From == None {
 		m.From = r.id
 	}
@@ -634,6 +644,7 @@ func (r *raft) reset(term uint64) {
 }
 
 func (r *raft) appendEntry(es ...pb.Entry) (accepted bool) {
+	debug.PrintStack()
 	li := r.raftLog.lastIndex()
 	for i := range es {
 		es[i].Term = r.Term
@@ -1021,6 +1032,9 @@ func stepLeader(r *raft, m pb.Message) error {
 		})
 		return nil
 	case pb.MsgProp:
+		reque := new(etcdserverpb.InternalRaftRequest)
+		reque.Unmarshal(m.Entries[0].Data)
+		r.logger.Infof("%x receives propose %+v\n", r.id, reque)
 		if len(m.Entries) == 0 {
 			r.logger.Panicf("%x stepped empty MsgProp", r.id)
 		}
