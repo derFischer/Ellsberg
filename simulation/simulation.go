@@ -183,9 +183,9 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 			case msg := <-sl.MsgCh:
 				if msg.Send {
 					if msg.Type == simulationpb.ClientMsg {
-						sl.CheckClientReplyMessage(msg.Msg)
+						// sl.CheckClientReplyMessage(msg.Msg)
 					} else {
-						sl.CheckRaftMessage(msg.Msg.(raftpb.Message))
+						// sl.CheckRaftMessage(msg.Msg.(raftpb.Message))
 					}
 				} else {
 					if msg.Type == simulationpb.ClientMsg {
