@@ -159,12 +159,12 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	//hack the initial state
 	log := make([]Command, 9)
 	log[0] = Command{CommandIndex: 0}
-	log[8] = Command{CommandIndex: 8}
+	// log[8] = Command{CommandIndex: 8}
 
 	sl := new(Simulation)
 	sl.me = id
 	sl.State = Follower
-	sl.CurrentTerm = 0
+	sl.CurrentTerm = 1
 	sl.VotedFor = NOONE
 	sl.Votes = votes
 	sl.Alive = alive
@@ -173,6 +173,9 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	sl.mmatchIndex = matchIndex
 	sl.peers = peers
 	sl.MsgCh = make(chan simulationpb.Msg)
+
+	sl.RaftBuffer = make([]interface{}, 0)
+	sl.ClientBuffer = make([]ClientEntry, 0)
 
 	go func() {
 		for {
@@ -274,7 +277,7 @@ func (s *Simulation) getLastCommandTerm() uint64 {
 }
 
 func (s *Simulation) getCurrentIndex(commandIndex uint64) uint64 {
-	if len(s.Log) <= 1 {
+	if len(s.Log) == 0 {
 		return NONEXIST
 	}
 	first_command_index := s.Log[0].CommandIndex
@@ -318,6 +321,58 @@ func (s *Simulation) entryInLog(args Op) (bool, Command) {
 	return false, Command{}
 }
 
+func (s *Simulation) InsertEmtpy(in_cmd Command) {
+	index := in_cmd.CommandIndex
+	if index < s.getFirstCommandIndex() {
+		log.Fatal("the log has already been truncated, cannot insert the emtpy entry\n")
+		return
+	}
+	if index > s.getLastCommandIndex()+1 {
+		log.Fatal("the log is too short to append the empty entry\n")
+		return
+	}
+	if index == s.getLastCommandIndex()+1 {
+		s.Log = append(s.Log, in_cmd)
+		return
+	}
+
+	local_index := s.getCurrentIndex(index)
+	for i := 0; i < len(s.Log); i++ {
+		if i < int(local_index) {
+			continue
+		}
+		cmd := s.Log[i]
+		s.Log[i] = Command{CommandTerm: cmd.CommandTerm, CommandIndex: cmd.CommandIndex + 1, Command: cmd.Command}
+	}
+	s.Log = append(append(s.Log[:local_index], in_cmd), s.Log[local_index:]...)
+	return
+}
+
+func (s *Simulation) logMatch(l []Command) bool {
+	for i := 0; i < len(l); i++ {
+		cmd := l[i]
+		local_cmd := s.getCommand(cmd.CommandIndex)
+		if local_cmd.CommandIndex == TRUNCATED {
+			continue
+		}
+		if local_cmd.CommandIndex == NONEXIST {
+			if !(cmd.Command.Data == nil && cmd.CommandIndex == s.getLastCommandIndex()+1) {
+				return false
+			}
+			s.InsertEmtpy(cmd)
+			continue
+		}
+		if reflect.DeepEqual(cmd, local_cmd) {
+			continue
+		}
+		if cmd.Command.Data != nil {
+			return false
+		}
+		s.InsertEmtpy(cmd)
+	}
+	return true
+}
+
 //func (s *Simulation) Get(key string, commandIndex int) (bool, string) {
 //	found := false
 //	value := ""
@@ -351,6 +406,10 @@ func (s *Simulation) appendEntries(entries []Command) {
 
 func CommandInterpreter(command raftpb.Entry) Command {
 	//var req *pb.InternalRaftRequest
+	if command.Data == nil {
+		return Command{CommandIndex: command.Index, CommandTerm: command.Term, Command: Op{Type: EntryNormal, Data: command.Data}}
+	}
+
 	req := new(pb.InternalRaftRequest)
 	err := req.Unmarshal(command.Data)
 	if err != nil {
@@ -561,7 +620,8 @@ func (s *Simulation) AppendEntryRequestChecker(args AppendEntriesArgs) bool {
 		s.Leader()
 	}
 	state_check := (s.State == Leader) && (args.mterm == s.CurrentTerm) && (args.From == s.me) && (args.mcommitIndex <= s.CommitIndex)
-	params_checker := Equal(args.mprevLogTerm, s.getCommandTerm(args.mprevLogIndex)) && SliceEqual(args.mentries, s.getLogSlice(args.mprevLogIndex, uint64(len(args.mentries))))
+	// params_checker := Equal(args.mprevLogTerm, s.getCommandTerm(args.mprevLogIndex)) && SliceEqual(args.mentries, s.getLogSlice(args.mprevLogIndex, uint64(len(args.mentries))))
+	params_checker := Equal(args.mprevLogTerm, s.getCommandTerm(args.mprevLogIndex)) && s.logMatch(args.mentries)
 	//////fmt.Printf("request args: %+v, local state: %+v\n", args, s)
 	//////fmt.Printf("state_check: %+v, params_check: %+v\n", state_check, SliceEqual(args.mentries, s.getLogSlice(args.mprevLogIndex, len(args.mentries))))
 	return args.From == s.me && state_check && params_checker
@@ -692,9 +752,9 @@ func (s *Simulation) AppendEntryRequestHandler(args AppendEntriesArgs) AppendEnt
 	logOK := (args.mprevLogIndex == 0) || (args.mprevLogIndex > 0 && args.mprevLogIndex <= s.getLastCommandIndex() && Equal(args.mprevLogTerm, s.getCommandTerm(args.mprevLogIndex)))
 
 	//hack the initial state:
-	if args.mprevLogIndex <= 8 {
-		logOK = true
-	}
+	// if args.mprevLogIndex <= 8 {
+	// 	logOK = true
+	// }
 
 	if args.mterm == s.CurrentTerm && s.State == Follower && !logOK {
 		r.mterm = s.CurrentTerm
