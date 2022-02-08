@@ -17,6 +17,7 @@ package raft
 import (
 	"fmt"
 	"log"
+	"runtime/debug"
 
 	pb "go.etcd.io/etcd/v3/raft/raftpb"
 )
@@ -104,6 +105,7 @@ func (l *raftLog) maybeAppend(index, logTerm, committed uint64, ents ...pb.Entry
 }
 
 func (l *raftLog) append(ents ...pb.Entry) uint64 {
+	debug.PrintStack()
 	if len(ents) == 0 {
 		return l.lastIndex()
 	}
