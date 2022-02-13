@@ -140,7 +140,7 @@ type Simulation struct {
 	Alive       []bool
 	MsgCh       chan simulationpb.Msg
 
-	RaftBuffer   []interface{}
+	// RaftBuffer   []interface{}
 	ClientBuffer []ClientEntry
 }
 
@@ -174,7 +174,7 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	sl.peers = peers
 	sl.MsgCh = make(chan simulationpb.Msg)
 
-	sl.RaftBuffer = make([]interface{}, 0)
+	// sl.RaftBuffer = make([]interface{}, 0)
 	sl.ClientBuffer = make([]ClientEntry, 0)
 
 	go func() {
@@ -183,9 +183,9 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 			case msg := <-sl.MsgCh:
 				if msg.Send {
 					if msg.Type == simulationpb.ClientMsg {
-						// sl.CheckClientReplyMessage(msg.Msg)
+						sl.CheckClientReplyMessage(msg.Msg)
 					} else {
-						// sl.CheckRaftMessage(msg.Msg.(raftpb.Message))
+						sl.CheckRaftMessage(msg.Msg.(raftpb.Message), msg.Req)
 					}
 				} else {
 					if msg.Type == simulationpb.ClientMsg {
@@ -507,21 +507,21 @@ func (s *Simulation) MsgInterpreter(msg raftpb.Message) interface{} {
 
 //call From the upper layer
 //checker function: check whether the messages are valid before actually send them out
-func (s *Simulation) CheckRaftMessage(req raftpb.Message) {
+func (s *Simulation) CheckRaftMessage(msg raftpb.Message, req interface{}) {
 	valid := true
-	switch req.Type {
+	switch msg.Type {
 	case raftpb.MsgVote:
-		valid = s.RequestVoteRequestChecker(s.MsgInterpreter(req).(RequestVoteArgs))
+		valid = s.RequestVoteRequestChecker(s.MsgInterpreter(msg).(RequestVoteArgs))
 	case raftpb.MsgApp:
-		valid = s.AppendEntryRequestChecker(s.MsgInterpreter(req).(AppendEntriesArgs))
+		valid = s.AppendEntryRequestChecker(s.MsgInterpreter(msg).(AppendEntriesArgs))
 	case raftpb.MsgHeartbeat:
-		valid = s.AppendEntryRequestChecker(s.MsgInterpreter(req).(AppendEntriesArgs))
+		valid = s.AppendEntryRequestChecker(s.MsgInterpreter(msg).(AppendEntriesArgs))
 	case raftpb.MsgVoteResp:
-		valid = s.RequestVoteReplyChecker(s.MsgInterpreter(req).(RequestVoteReply))
+		valid = s.RequestVoteReplyChecker(s.MsgInterpreter(msg).(RequestVoteReply), s.HandleRaftMessages(req.(raftpb.Message)).(RequestVoteReply))
 	case raftpb.MsgAppResp:
-		valid = s.AppendEntryReplyChecker(s.MsgInterpreter(req).(AppendEntriesReply))
+		valid = s.AppendEntryReplyChecker(s.MsgInterpreter(msg).(AppendEntriesReply), s.HandleRaftMessages(req.(raftpb.Message)).(AppendEntriesReply))
 	case raftpb.MsgHeartbeatResp:
-		valid = s.AppendEntryReplyChecker(s.MsgInterpreter(req).(AppendEntriesReply))
+		valid = s.AppendEntryReplyChecker(s.MsgInterpreter(msg).(AppendEntriesReply), s.HandleRaftMessages(req.(raftpb.Message)).(AppendEntriesReply))
 	}
 	if !valid {
 		log.Fatalf("check request message error! server: %d, args: %+v\n local state: %+v\n", s.me, req, s)
@@ -546,7 +546,7 @@ func (s *Simulation) HandleClientRequest(req interface{}) {
 	return
 }
 
-func (s *Simulation) HandleRaftMessages(msg raftpb.Message) {
+func (s *Simulation) HandleRaftMessages(msg raftpb.Message) interface{} {
 	s.ConnectionAlive(msg)
 	switch msg.Type {
 	//case raftpb.MsgProp:
@@ -557,14 +557,17 @@ func (s *Simulation) HandleRaftMessages(msg raftpb.Message) {
 	case raftpb.MsgVote:
 		r := s.RequestVoteRequestHandler(s.MsgInterpreter(msg).(RequestVoteArgs))
 		log.Printf("receives MsgVote: %+v, after interpreter: %+v, reply: %+v\n", msg, s.MsgInterpreter(msg).(RequestVoteArgs), r)
-		s.RaftBuffer = append(s.RaftBuffer, r)
+		return r
+		// s.RaftBuffer = append(s.RaftBuffer, r)
 	case raftpb.MsgApp:
 		r := s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs))
 		log.Printf("receives MsgApp: %+v, after interpreter: %+v, reply: %+v\n", msg, s.MsgInterpreter(msg).(AppendEntriesArgs), s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs)))
-		s.RaftBuffer = append(s.RaftBuffer, r)
+		return r
+		// s.RaftBuffer = append(s.RaftBuffer, r)
 	case raftpb.MsgHeartbeat:
 		r := s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs))
-		s.RaftBuffer = append(s.RaftBuffer, r)
+		return r
+		// s.RaftBuffer = append(s.RaftBuffer, r)
 	case raftpb.MsgVoteResp:
 		s.RequestVoteReplyHandler(s.MsgInterpreter(msg).(RequestVoteReply))
 	case raftpb.MsgAppResp:
@@ -572,6 +575,7 @@ func (s *Simulation) HandleRaftMessages(msg raftpb.Message) {
 	case raftpb.MsgHeartbeatResp:
 		s.AppendEntryReplyHandler(s.MsgInterpreter(msg).(AppendEntriesReply))
 	}
+	return nil
 }
 
 // func (s *Simulation) HandleRaftRequestMessage(req raftpb.Message) {
@@ -635,12 +639,14 @@ func (s *Simulation) BecomeLeaderChecker() bool {
 	return s.testLeader()
 }
 
-func (s *Simulation) RequestVoteReplyChecker(r_exec RequestVoteReply) bool {
-	return s.searchInRaftBuffer(r_exec)
+func (s *Simulation) RequestVoteReplyChecker(r_exec RequestVoteReply, r_sl RequestVoteReply) bool {
+	// return s.searchInRaftBuffer(r_exec)
+	return r_exec == r_sl
 }
 
-func (s *Simulation) AppendEntryReplyChecker(r_exec AppendEntriesReply) bool {
-	return s.searchInRaftBuffer(r_exec)
+func (s *Simulation) AppendEntryReplyChecker(r_exec AppendEntriesReply, r_sl AppendEntriesReply) bool {
+	// return s.searchInRaftBuffer(r_exec)
+	return r_exec == r_sl
 }
 
 //func (s *Simulation) GetReplyChecker(args Op, reply GetReply) bool {
@@ -866,16 +872,16 @@ func (s *Simulation) updateCommitIndex() {
 	}
 }
 
-func (s *Simulation) searchInRaftBuffer(e interface{}) bool {
-	length := len(s.RaftBuffer)
-	for i := 0; i < length; i++ {
-		if reflect.DeepEqual(s.RaftBuffer[i], e) {
-			s.RaftBuffer = append(s.RaftBuffer[:i], s.RaftBuffer[i+1:]...)
-			return true
-		}
-	}
-	return false
-}
+// func (s *Simulation) searchInRaftBuffer(e interface{}) bool {
+// 	length := len(s.RaftBuffer)
+// 	for i := 0; i < length; i++ {
+// 		if reflect.DeepEqual(s.RaftBuffer[i], e) {
+// 			s.RaftBuffer = append(s.RaftBuffer[:i], s.RaftBuffer[i+1:]...)
+// 			return true
+// 		}
+// 	}
+// 	return false
+// }
 
 func (s *Simulation) searchInClientBuffer(e interface{}) (bool, uint64) {
 	length := len(s.ClientBuffer)

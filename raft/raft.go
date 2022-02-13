@@ -407,8 +407,8 @@ func (r *raft) hardState() pb.HardState {
 }
 
 // send persists state to stable storage and then sends to its mailbox.
-func (r *raft) send(m pb.Message) {
-	simulationpb.Sending(r.SLmsg, simulationpb.Msg{Send: true, Type: simulationpb.RaftMsg, Msg: m})
+func (r *raft) send(args interface{}, m pb.Message) {
+	simulationpb.Sending(r.SLmsg, simulationpb.Msg{Send: true, Type: simulationpb.RaftMsg, Msg: m, Req: args})
 	if m.From == None {
 		m.From = r.id
 	}
@@ -512,7 +512,7 @@ func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 			}
 		}
 	}
-	r.send(m)
+	r.send(nil, m)
 	return true
 }
 
@@ -532,7 +532,7 @@ func (r *raft) sendHeartbeat(to uint64, ctx []byte) {
 		Context: ctx,
 	}
 
-	r.send(m)
+	r.send(nil, m)
 }
 
 // bcastAppend sends RPC, with entries to all peers that are not up-to-date
@@ -827,7 +827,7 @@ func (r *raft) campaign(t CampaignType) {
 		if t == campaignTransfer {
 			ctx = []byte(t)
 		}
-		r.send(pb.Message{Term: term, To: id, Type: voteMsg, Index: r.raftLog.lastIndex(), LogTerm: r.raftLog.lastTerm(), Context: ctx})
+		r.send(nil, pb.Message{Term: term, To: id, Type: voteMsg, Index: r.raftLog.lastIndex(), LogTerm: r.raftLog.lastTerm(), Context: ctx})
 	}
 }
 
@@ -901,14 +901,14 @@ func (r *raft) Step(m pb.Message) error {
 			// with "pb.MsgAppResp" of higher term would force leader to step down.
 			// However, this disruption is inevitable to free this stuck node with
 			// fresh election. This can be prevented with Pre-Vote phase.
-			r.send(pb.Message{To: m.From, Type: pb.MsgAppResp})
+			r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp})
 		} else if m.Type == pb.MsgPreVote {
 			// Before Pre-Vote enable, there may have candidate with higher term,
 			// but less log. After update to Pre-Vote, the cluster may deadlock if
 			// we drop messages with a lower term.
 			r.logger.Infof("%x [logterm: %d, index: %d, vote: %x] rejected %s from %x [logterm: %d, index: %d] at term %d",
 				r.id, r.raftLog.lastTerm(), r.raftLog.lastIndex(), r.Vote, m.Type, m.From, m.LogTerm, m.Index, r.Term)
-			r.send(pb.Message{To: m.From, Term: r.Term, Type: pb.MsgPreVoteResp, Reject: true})
+			r.send(m, pb.Message{To: m.From, Term: r.Term, Type: pb.MsgPreVoteResp, Reject: true})
 		} else {
 			// ignore other cases
 			r.logger.Infof("%x [term: %d] ignored a %s message with lower term from %x [term: %d]",
@@ -981,7 +981,7 @@ func (r *raft) Step(m pb.Message) error {
 			// the message (it ignores all out of date messages).
 			// The term in the original message and current local term are the
 			// same in the case of regular votes, but different for pre-votes.
-			r.send(pb.Message{To: m.From, Term: m.Term, Type: voteRespMsgType(m.Type)})
+			r.send(m, pb.Message{To: m.From, Term: m.Term, Type: voteRespMsgType(m.Type)})
 			if m.Type == pb.MsgVote {
 				// Only record real votes.
 				r.electionElapsed = 0
@@ -990,7 +990,7 @@ func (r *raft) Step(m pb.Message) error {
 		} else {
 			r.logger.Infof("%x [logterm: %d, index: %d, vote: %x] rejected %s from %x [logterm: %d, index: %d] at term %d",
 				r.id, r.raftLog.lastTerm(), r.raftLog.lastIndex(), r.Vote, m.Type, m.From, m.LogTerm, m.Index, r.Term)
-			r.send(pb.Message{To: m.From, Term: r.Term, Type: voteRespMsgType(m.Type), Reject: true})
+			r.send(m, pb.Message{To: m.From, Term: r.Term, Type: voteRespMsgType(m.Type), Reject: true})
 		}
 
 	default:
@@ -1098,7 +1098,7 @@ func stepLeader(r *raft, m pb.Message) error {
 		// only one voting member (the leader) in the cluster
 		if r.prs.IsSingleton() {
 			if resp := r.responseToReadIndexReq(m, r.raftLog.committed); resp.To != None {
-				r.send(resp)
+				r.send(m, resp)
 			}
 			return nil
 		}
@@ -1120,7 +1120,7 @@ func stepLeader(r *raft, m pb.Message) error {
 			r.bcastHeartbeatWithCtx(m.Entries[0].Data)
 		case ReadOnlyLeaseBased:
 			if resp := r.responseToReadIndexReq(m, r.raftLog.committed); resp.To != None {
-				r.send(resp)
+				r.send(m, resp)
 			}
 		}
 		return nil
@@ -1213,7 +1213,7 @@ func stepLeader(r *raft, m pb.Message) error {
 		rss := r.readOnly.advance(m)
 		for _, rs := range rss {
 			if resp := r.responseToReadIndexReq(rs.req, rs.index); resp.To != None {
-				r.send(resp)
+				r.send(m, resp)
 			}
 		}
 	case pb.MsgSnapStatus:
@@ -1339,7 +1339,7 @@ func stepFollower(r *raft, m pb.Message) error {
 			return ErrProposalDropped
 		}
 		m.To = r.lead
-		r.send(m)
+		r.send(nil, m)
 	case pb.MsgApp:
 		r.electionElapsed = 0
 		r.lead = m.From
@@ -1358,7 +1358,7 @@ func stepFollower(r *raft, m pb.Message) error {
 			return nil
 		}
 		m.To = r.lead
-		r.send(m)
+		r.send(nil, m)
 	case pb.MsgTimeoutNow:
 		if r.promotable() {
 			r.logger.Infof("%x [term %d] received MsgTimeoutNow from %x and starts an election to get leadership.", r.id, r.Term, m.From)
@@ -1375,7 +1375,7 @@ func stepFollower(r *raft, m pb.Message) error {
 			return nil
 		}
 		m.To = r.lead
-		r.send(m)
+		r.send(nil, m)
 	case pb.MsgReadIndexResp:
 		if len(m.Entries) != 1 {
 			r.logger.Errorf("%x invalid format of MsgReadIndexResp from %x, entries count: %d", r.id, m.From, len(m.Entries))
@@ -1388,22 +1388,22 @@ func stepFollower(r *raft, m pb.Message) error {
 
 func (r *raft) handleAppendEntries(m pb.Message) {
 	if m.Index < r.raftLog.committed {
-		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.committed})
+		r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.committed})
 		return
 	}
 
 	if mlastIndex, ok := r.raftLog.maybeAppend(m.Index, m.LogTerm, m.Commit, m.Entries...); ok {
-		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: mlastIndex})
+		r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Index: mlastIndex})
 	} else {
 		r.logger.Debugf("%x [logterm: %d, index: %d] rejected MsgApp [logterm: %d, index: %d] from %x",
 			r.id, r.raftLog.zeroTermOnErrCompacted(r.raftLog.term(m.Index)), m.Index, m.LogTerm, m.Index, m.From)
-		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: m.Index, Reject: true, RejectHint: r.raftLog.lastIndex()})
+		r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Index: m.Index, Reject: true, RejectHint: r.raftLog.lastIndex()})
 	}
 }
 
 func (r *raft) handleHeartbeat(m pb.Message) {
 	r.raftLog.commitTo(m.Commit)
-	r.send(pb.Message{To: m.From, Type: pb.MsgHeartbeatResp, Context: m.Context})
+	r.send(m, pb.Message{To: m.From, Type: pb.MsgHeartbeatResp, Context: m.Context})
 }
 
 func (r *raft) handleSnapshot(m pb.Message) {
@@ -1411,11 +1411,11 @@ func (r *raft) handleSnapshot(m pb.Message) {
 	if r.restore(m.Snapshot) {
 		r.logger.Infof("%x [commit: %d] restored snapshot [index: %d, term: %d]",
 			r.id, r.raftLog.committed, sindex, sterm)
-		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.lastIndex()})
+		r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.lastIndex()})
 	} else {
 		r.logger.Infof("%x [commit: %d] ignored snapshot [index: %d, term: %d]",
 			r.id, r.raftLog.committed, sindex, sterm)
-		r.send(pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.committed})
+		r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.committed})
 	}
 }
 
@@ -1608,7 +1608,7 @@ func (r *raft) resetRandomizedElectionTimeout() {
 }
 
 func (r *raft) sendTimeoutNow(to uint64) {
-	r.send(pb.Message{To: to, Type: pb.MsgTimeoutNow})
+	r.send(nil, pb.Message{To: to, Type: pb.MsgTimeoutNow})
 }
 
 func (r *raft) abortLeaderTransfer() {

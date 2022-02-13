@@ -10,7 +10,7 @@ const (
 type Msg struct {
 	Send bool
 	Type MsgType
-	req  interface{}
+	Req  interface{}
 	Msg  interface{}
 }
 
