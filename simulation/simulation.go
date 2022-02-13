@@ -157,8 +157,9 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 		matchIndex[i] = 0
 	}
 	//hack the initial state
-	log := make([]Command, 9)
+	log := make([]Command, 4)
 	log[0] = Command{CommandIndex: 0}
+	log[4] = Command{CommandIndex: 3}
 	// log[8] = Command{CommandIndex: 8}
 
 	sl := new(Simulation)
@@ -613,6 +614,12 @@ func (s *Simulation) RequestVoteRequestChecker(args RequestVoteArgs) bool {
 		}
 		s.Candidate()
 	}
+
+	//hack the initial state
+	if args.mlastLogIndex <= 8 {
+		return true
+	}
+
 	return args.From == s.me && s.State == Candidate && args.mterm == s.CurrentTerm && args.mlastLogIndex == s.getLastCommandIndex() && args.mlastLogTerm == s.getLastCommandTerm()
 }
 
@@ -623,6 +630,13 @@ func (s *Simulation) AppendEntryRequestChecker(args AppendEntriesArgs) bool {
 		}
 		s.Leader()
 	}
+
+	//hack the initial state
+	if args.mprevLogIndex <= 8 {
+		s.hackEntries(args.mentries)
+		return true
+	}
+
 	state_check := (s.State == Leader) && (args.mterm == s.CurrentTerm) && (args.From == s.me) && (args.mcommitIndex <= s.CommitIndex)
 	// params_checker := Equal(args.mprevLogTerm, s.getCommandTerm(args.mprevLogIndex)) && SliceEqual(args.mentries, s.getLogSlice(args.mprevLogIndex, uint64(len(args.mentries))))
 	params_checker := Equal(args.mprevLogTerm, s.getCommandTerm(args.mprevLogIndex)) && s.logMatch(args.mentries)
@@ -893,6 +907,25 @@ func (s *Simulation) searchInClientBuffer(e interface{}) (bool, uint64) {
 		}
 	}
 	return false, 0
+}
+
+//hack function
+func (s *Simulation) hackEntries(entries []Command) {
+	for i := 0; i < len(entries); i++ {
+		cmd := entries[i]
+		if s.getFirstCommandIndex() > cmd.CommandIndex {
+			continue
+		}
+		if s.getLastCommandIndex() < cmd.CommandIndex {
+			if s.getLastCommandIndex() == cmd.CommandIndex-1 {
+				s.Log = append(s.Log, cmd)
+				continue
+			}
+		} else {
+			local_index := s.getCurrentIndex(cmd.CommandIndex)
+			s.Log[local_index] = cmd
+		}
+	}
 }
 
 //for debug
