@@ -419,6 +419,7 @@ func CommandInterpreter(command raftpb.Entry) Command {
 	}
 	if req.Put != nil {
 		data, _ := (req.Put).Marshal()
+		log.Printf("!!!!!!!!!!!!!!!!!the request is: %+v\n, the bytes are: %+v\n", req.Put, data)
 		return Command{CommandIndex: command.Index, CommandTerm: command.Term, Command: Op{Type: EntryKVPut, Key: req.Put.Key, Value: req.Put.Value, Data: data}}
 	}
 	return Command{CommandIndex: command.Index, CommandTerm: command.Term, Command: Op{Type: EntryNormal, Data: command.Data}}
