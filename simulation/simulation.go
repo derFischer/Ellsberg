@@ -808,6 +808,7 @@ func (s *Simulation) AppendEntryRequestHandler(args AppendEntriesArgs) AppendEnt
 	}
 	r.mterm = s.CurrentTerm
 	r.msuccess = (args.mterm == s.CurrentTerm) && (s.State == Follower) && logOK
+	r.mmatchIndex = args.mprevLogIndex + uint64(len(args.mentries))
 	return r
 }
 
