@@ -501,7 +501,7 @@ func (s *Simulation) MsgInterpreter(msg raftpb.Message) interface{} {
 	case raftpb.MsgHeartbeat:
 		return AppendEntriesArgs{From: msg.From, mterm: msg.Term, mprevLogIndex: s.getLastCommandIndex(), mprevLogTerm: s.getLastCommandTerm(), mentries: []Command{}, mcommitIndex: msg.Commit}
 	case raftpb.MsgHeartbeatResp:
-		return AppendEntriesReply{From: msg.From, mterm: msg.Term, msuccess: !msg.Reject}
+		return AppendEntriesReply{From: msg.From, mterm: msg.Term, msuccess: !msg.Reject, mmatchIndex: msg.Index}
 	}
 	return nil
 }
@@ -674,7 +674,7 @@ func (s *Simulation) RequestVoteReplyChecker(r_exec RequestVoteReply, r_sl Reque
 
 func (s *Simulation) AppendEntryReplyChecker(r_exec AppendEntriesReply, r_sl AppendEntriesReply) bool {
 	// return s.searchInRaftBuffer(r_exec)
-	r := (r_exec == r_sl)
+	r := (r_exec.From == r_sl.From) && (r_exec.mterm == r_sl.mterm) && (r_exec.msuccess == r_sl.msuccess) && (r_exec.mmatchIndex <= r_sl.mmatchIndex)
 	if !r {
 		log.Printf("!!!!!!!!!appendentryreplychecker failed. exec: %+v\n sl: %+v\n", r_exec, r_sl)
 	}
