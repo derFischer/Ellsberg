@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"log"
 	"time"
 
 	"go.etcd.io/etcd/v3/auth"
@@ -139,11 +140,13 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 
 func (s *EtcdServer) Put(ctx context.Context, r *pb.PutRequest) (*pb.PutResponse, error) {
 	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: false, Type: simulationpb.ClientMsg, Msg: r})
+	log.Printf("!!!!!!!!!!!!!!!!!!!!!!request before process: %+v\n", r)
 	ctx = context.WithValue(ctx, traceutil.StartTimeKey, time.Now())
 	resp, err := s.raftRequest(ctx, pb.InternalRaftRequest{Put: r})
 	if err != nil {
 		return nil, err
 	}
+	log.Printf("!!!!!!!!!!!!!!!!!!!!!!request after process: %+v\n", r)
 	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: true, Type: simulationpb.ClientMsg, Msg: resp, Req: r})
 	return resp.(*pb.PutResponse), nil
 }
