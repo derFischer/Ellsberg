@@ -184,7 +184,7 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 			case msg := <-sl.MsgCh:
 				if msg.Send {
 					if msg.Type == simulationpb.ClientMsg {
-						sl.CheckClientReplyMessage(msg.Msg)
+						sl.CheckClientReplyMessage(msg.Msg, msg.Req)
 					} else {
 						sl.CheckRaftMessage(msg.Msg.(raftpb.Message), msg.Req)
 					}
@@ -533,8 +533,8 @@ func (s *Simulation) CheckRaftMessage(msg raftpb.Message, req interface{}) {
 	}
 }
 
-func (s *Simulation) CheckClientReplyMessage(reply interface{}) {
-	find, index := s.searchInClientBuffer(reply)
+func (s *Simulation) CheckClientReplyMessage(reply interface{}, req interface{}) {
+	find, index := s.searchInClientBuffer(req)
 	if !find {
 		log.Fatalf("%d haven't received the client req before\n", s.me)
 	}

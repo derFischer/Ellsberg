@@ -133,7 +133,7 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 		return nil, err
 	}
 	//check reply here
-	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: true, Type: simulationpb.ClientMsg, Msg: resp})
+	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: true, Type: simulationpb.ClientMsg, Msg: resp, Req: r})
 	return resp, err
 }
 
@@ -144,7 +144,7 @@ func (s *EtcdServer) Put(ctx context.Context, r *pb.PutRequest) (*pb.PutResponse
 	if err != nil {
 		return nil, err
 	}
-	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: true, Type: simulationpb.ClientMsg, Msg: resp})
+	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: true, Type: simulationpb.ClientMsg, Msg: resp, Req: r})
 	return resp.(*pb.PutResponse), nil
 }
 
