@@ -687,6 +687,7 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 	defer cancel()
 
 	start := time.Now()
+	log.Printf("!!!!!!!!!!!!!!!!!!!put request before propose: %+v\n", r.Put)
 	err = s.r.Propose(cctx, data)
 	if err != nil {
 		proposalsFailed.Inc()
