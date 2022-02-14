@@ -159,7 +159,7 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	//hack the initial state
 	log := make([]Command, 4)
 	log[0] = Command{CommandIndex: 0}
-	log[3] = Command{CommandIndex: 3}
+	log[3] = Command{CommandIndex: 3, CommandTerm: 1}
 	// log[8] = Command{CommandIndex: 8}
 
 	sl := new(Simulation)
@@ -555,20 +555,20 @@ func (s *Simulation) HandleRaftMessages(msg raftpb.Message) interface{} {
 	//		log.Fatalf("the prop type is not normal\n")
 	//	}
 	//	s.ClientRequestHandler(Op{Type: EntryNormal, Data: msg.Entries[0].Data})
-	case raftpb.MsgVote:
-		r := s.RequestVoteRequestHandler(s.MsgInterpreter(msg).(RequestVoteArgs))
-		log.Printf("receives MsgVote: %+v, after interpreter: %+v, reply: %+v\n", msg, s.MsgInterpreter(msg).(RequestVoteArgs), r)
-		return r
-		// s.RaftBuffer = append(s.RaftBuffer, r)
-	case raftpb.MsgApp:
-		r := s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs))
-		log.Printf("receives MsgApp: %+v, after interpreter: %+v, reply: %+v\n", msg, s.MsgInterpreter(msg).(AppendEntriesArgs), s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs)))
-		return r
-		// s.RaftBuffer = append(s.RaftBuffer, r)
-	case raftpb.MsgHeartbeat:
-		r := s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs))
-		return r
-		// s.RaftBuffer = append(s.RaftBuffer, r)
+	// case raftpb.MsgVote:
+	// 	r := s.RequestVoteRequestHandler(s.MsgInterpreter(msg).(RequestVoteArgs))
+	// 	log.Printf("receives MsgVote: %+v, after interpreter: %+v, reply: %+v\n", msg, s.MsgInterpreter(msg).(RequestVoteArgs), r)
+	// 	return r
+	// 	// s.RaftBuffer = append(s.RaftBuffer, r)
+	// case raftpb.MsgApp:
+	// 	r := s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs))
+	// 	log.Printf("receives MsgApp: %+v, after interpreter: %+v, reply: %+v\n", msg, s.MsgInterpreter(msg).(AppendEntriesArgs), s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs)))
+	// 	return r
+	// 	// s.RaftBuffer = append(s.RaftBuffer, r)
+	// case raftpb.MsgHeartbeat:
+	// 	r := s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs))
+	// 	return r
+	// s.RaftBuffer = append(s.RaftBuffer, r)
 	case raftpb.MsgVoteResp:
 		s.RequestVoteReplyHandler(s.MsgInterpreter(msg).(RequestVoteReply))
 	case raftpb.MsgAppResp:
@@ -743,7 +743,6 @@ func (s *Simulation) ClientRequestHandler(args Op) uint64 {
 }
 
 func (s *Simulation) RequestVoteRequestHandler(args RequestVoteArgs) RequestVoteReply {
-	//fmt.Printf("server %d receives vote request, args: %+v\n, local: %+v\n", s.me, args, s)
 	r := RequestVoteReply{From: s.me}
 	if s.DropStaleResponse(args.mterm) {
 		r.mterm = s.CurrentTerm
@@ -758,6 +757,7 @@ func (s *Simulation) RequestVoteRequestHandler(args RequestVoteArgs) RequestVote
 	}
 	r.mterm = s.CurrentTerm
 	r.mvoteGranted = grant
+	log.Printf("server %d receives vote request, args: %+v\n, local: %+v\n, reply: %+v\n", s.me, args, s, r)
 	return r
 }
 
