@@ -367,6 +367,7 @@ func (s *Simulation) logMatch(l []Command) bool {
 			continue
 		}
 		if cmd.Command.Data != nil {
+			log.Printf("!!!!!!!!!!!!!!!!!!!!entry content different: local: %+v\n, compared: %+v\n", local_cmd, cmd)
 			return false
 		}
 		s.InsertEmtpy(cmd)
@@ -653,6 +654,9 @@ func (s *Simulation) AppendEntryRequestChecker(args AppendEntriesArgs) bool {
 	state_check := (s.State == Leader) && (args.mterm == s.CurrentTerm) && (args.From == s.me) && (args.mcommitIndex <= s.CommitIndex)
 	// params_checker := Equal(args.mprevLogTerm, s.getCommandTerm(args.mprevLogIndex)) && SliceEqual(args.mentries, s.getLogSlice(args.mprevLogIndex, uint64(len(args.mentries))))
 	params_checker := Equal(args.mprevLogTerm, s.getCommandTerm(args.mprevLogIndex)) && s.logMatch(args.mentries)
+	if !state_check {
+		log.P
+	}
 	//////fmt.Printf("request args: %+v, local state: %+v\n", args, s)
 	//////fmt.Printf("state_check: %+v, params_check: %+v\n", state_check, SliceEqual(args.mentries, s.getLogSlice(args.mprevLogIndex, len(args.mentries))))
 	return args.From == s.me && state_check && params_checker
