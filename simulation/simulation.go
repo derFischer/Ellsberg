@@ -518,11 +518,11 @@ func (s *Simulation) CheckRaftMessage(msg raftpb.Message, req interface{}) {
 	case raftpb.MsgHeartbeat:
 		valid = s.AppendEntryRequestChecker(s.MsgInterpreter(msg).(AppendEntriesArgs))
 	case raftpb.MsgVoteResp:
-		r := s.HandleRaftReqMessages(req.(raftpb.Message)).(RequestVoteReply)
-		valid = s.RequestVoteReplyChecker(s.MsgInterpreter(msg).(RequestVoteReply), r)
-		if !valid {
-			log.Fatalf("check request message error! server: %d, args: %+v\n local state: %+v\n, reply_impl: %+v\n, reply_sl: %+v\n", s.me, req, s, msg, r)
-		}
+		// r := s.HandleRaftReqMessages(req.(raftpb.Message)).(RequestVoteReply)
+		valid = s.RequestVoteReplyChecker(s.MsgInterpreter(msg).(RequestVoteReply), s.HandleRaftReqMessages(req.(raftpb.Message)).(RequestVoteReply))
+		// if !valid {
+		// 	log.Fatalf("check request message error! server: %d, args: %+v\n local state: %+v\n, reply_impl: %+v\n, reply_sl: %+v\n", s.me, req, s, msg, r)
+		// }
 	case raftpb.MsgAppResp:
 		valid = s.AppendEntryReplyChecker(s.MsgInterpreter(msg).(AppendEntriesReply), s.HandleRaftReqMessages(req.(raftpb.Message)).(AppendEntriesReply))
 	case raftpb.MsgHeartbeatResp:
@@ -665,12 +665,20 @@ func (s *Simulation) BecomeLeaderChecker() bool {
 
 func (s *Simulation) RequestVoteReplyChecker(r_exec RequestVoteReply, r_sl RequestVoteReply) bool {
 	// return s.searchInRaftBuffer(r_exec)
-	return r_exec == r_sl
+	r := (r_exec == r_sl)
+	if !r {
+		log.Printf("!!!!!!!!!requestvotereplychecker failed. exec: %+v\n sl: %+v\n", r_exec, r_sl)
+	}
+	return r
 }
 
 func (s *Simulation) AppendEntryReplyChecker(r_exec AppendEntriesReply, r_sl AppendEntriesReply) bool {
 	// return s.searchInRaftBuffer(r_exec)
-	return r_exec == r_sl
+	r := (r_exec == r_sl)
+	if !r {
+		log.Printf("!!!!!!!!!appendentryreplychecker failed. exec: %+v\n sl: %+v\n", r_exec, r_sl)
+	}
+	return r
 }
 
 //func (s *Simulation) GetReplyChecker(args Op, reply GetReply) bool {
