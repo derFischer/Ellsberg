@@ -529,7 +529,7 @@ func (s *Simulation) CheckRaftMessage(msg raftpb.Message, req interface{}) {
 		valid = s.AppendEntryReplyChecker(s.MsgInterpreter(msg).(AppendEntriesReply), s.HandleRaftReqMessages(req.(raftpb.Message)).(AppendEntriesReply))
 	}
 	if !valid {
-		log.Fatalf("check request message error! server: %d, args: %+v\n local state: %+v\n", s.me, req, s)
+		log.Fatalf("check request message error! server: %d, msg: %+v\n req: %+v\n local state: %+v\n", s.me, msg, req, s)
 	}
 }
 
