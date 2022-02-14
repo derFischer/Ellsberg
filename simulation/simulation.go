@@ -518,7 +518,11 @@ func (s *Simulation) CheckRaftMessage(msg raftpb.Message, req interface{}) {
 	case raftpb.MsgHeartbeat:
 		valid = s.AppendEntryRequestChecker(s.MsgInterpreter(msg).(AppendEntriesArgs))
 	case raftpb.MsgVoteResp:
-		valid = s.RequestVoteReplyChecker(s.MsgInterpreter(msg).(RequestVoteReply), s.HandleRaftReqMessages(req.(raftpb.Message)).(RequestVoteReply))
+		r := s.HandleRaftReqMessages(req.(raftpb.Message)).(RequestVoteReply)
+		valid = s.RequestVoteReplyChecker(s.MsgInterpreter(msg).(RequestVoteReply), r)
+		if !valid {
+			log.Fatalf("check request message error! server: %d, args: %+v\n local state: %+v\n, reply: %+v\n", s.me, req, s, msg)
+		}
 	case raftpb.MsgAppResp:
 		valid = s.AppendEntryReplyChecker(s.MsgInterpreter(msg).(AppendEntriesReply), s.HandleRaftReqMessages(req.(raftpb.Message)).(AppendEntriesReply))
 	case raftpb.MsgHeartbeatResp:
