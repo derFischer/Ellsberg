@@ -159,7 +159,7 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	//hack the initial state
 	log := make([]Command, 4)
 	log[0] = Command{CommandIndex: 0}
-	log[4] = Command{CommandIndex: 3}
+	log[3] = Command{CommandIndex: 3}
 	// log[8] = Command{CommandIndex: 8}
 
 	sl := new(Simulation)
