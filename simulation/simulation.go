@@ -518,11 +518,11 @@ func (s *Simulation) CheckRaftMessage(msg raftpb.Message, req interface{}) {
 	case raftpb.MsgHeartbeat:
 		valid = s.AppendEntryRequestChecker(s.MsgInterpreter(msg).(AppendEntriesArgs))
 	case raftpb.MsgVoteResp:
-		valid = s.RequestVoteReplyChecker(s.MsgInterpreter(msg).(RequestVoteReply), s.HandleRaftMessages(req.(raftpb.Message)).(RequestVoteReply))
+		valid = s.RequestVoteReplyChecker(s.MsgInterpreter(msg).(RequestVoteReply), s.HandleRaftReqMessages(req.(raftpb.Message)).(RequestVoteReply))
 	case raftpb.MsgAppResp:
-		valid = s.AppendEntryReplyChecker(s.MsgInterpreter(msg).(AppendEntriesReply), s.HandleRaftMessages(req.(raftpb.Message)).(AppendEntriesReply))
+		valid = s.AppendEntryReplyChecker(s.MsgInterpreter(msg).(AppendEntriesReply), s.HandleRaftReqMessages(req.(raftpb.Message)).(AppendEntriesReply))
 	case raftpb.MsgHeartbeatResp:
-		valid = s.AppendEntryReplyChecker(s.MsgInterpreter(msg).(AppendEntriesReply), s.HandleRaftMessages(req.(raftpb.Message)).(AppendEntriesReply))
+		valid = s.AppendEntryReplyChecker(s.MsgInterpreter(msg).(AppendEntriesReply), s.HandleRaftReqMessages(req.(raftpb.Message)).(AppendEntriesReply))
 	}
 	if !valid {
 		log.Fatalf("check request message error! server: %d, args: %+v\n local state: %+v\n", s.me, req, s)
@@ -547,28 +547,34 @@ func (s *Simulation) HandleClientRequest(req interface{}) {
 	return
 }
 
+func (s *Simulation) HandleRaftReqMessages(msg raftpb.Message) interface{} {
+	s.ConnectionAlive(msg)
+	switch msg.Type {
+	case raftpb.MsgProp:
+		if msg.Entries[0].Type != raftpb.EntryNormal {
+			log.Fatalf("the prop type is not normal\n")
+		}
+		s.ClientRequestHandler(Op{Type: EntryNormal, Data: msg.Entries[0].Data})
+	case raftpb.MsgVote:
+		r := s.RequestVoteRequestHandler(s.MsgInterpreter(msg).(RequestVoteArgs))
+		log.Printf("receives MsgVote: %+v, after interpreter: %+v, reply: %+v\n", msg, s.MsgInterpreter(msg).(RequestVoteArgs), r)
+		return r
+		// s.RaftBuffer = append(s.RaftBuffer, r)
+	case raftpb.MsgApp:
+		r := s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs))
+		log.Printf("receives MsgApp: %+v, after interpreter: %+v, reply: %+v\n", msg, s.MsgInterpreter(msg).(AppendEntriesArgs), s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs)))
+		return r
+		// s.RaftBuffer = append(s.RaftBuffer, r)
+	case raftpb.MsgHeartbeat:
+		r := s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs))
+		return r
+	}
+	return nil
+}
+
 func (s *Simulation) HandleRaftMessages(msg raftpb.Message) interface{} {
 	s.ConnectionAlive(msg)
 	switch msg.Type {
-	//case raftpb.MsgProp:
-	//	if msg.Entries[0].Type != raftpb.EntryNormal {
-	//		log.Fatalf("the prop type is not normal\n")
-	//	}
-	//	s.ClientRequestHandler(Op{Type: EntryNormal, Data: msg.Entries[0].Data})
-	// case raftpb.MsgVote:
-	// 	r := s.RequestVoteRequestHandler(s.MsgInterpreter(msg).(RequestVoteArgs))
-	// 	log.Printf("receives MsgVote: %+v, after interpreter: %+v, reply: %+v\n", msg, s.MsgInterpreter(msg).(RequestVoteArgs), r)
-	// 	return r
-	// 	// s.RaftBuffer = append(s.RaftBuffer, r)
-	// case raftpb.MsgApp:
-	// 	r := s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs))
-	// 	log.Printf("receives MsgApp: %+v, after interpreter: %+v, reply: %+v\n", msg, s.MsgInterpreter(msg).(AppendEntriesArgs), s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs)))
-	// 	return r
-	// 	// s.RaftBuffer = append(s.RaftBuffer, r)
-	// case raftpb.MsgHeartbeat:
-	// 	r := s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs))
-	// 	return r
-	// s.RaftBuffer = append(s.RaftBuffer, r)
 	case raftpb.MsgVoteResp:
 		s.RequestVoteReplyHandler(s.MsgInterpreter(msg).(RequestVoteReply))
 	case raftpb.MsgAppResp:
