@@ -418,7 +418,8 @@ func CommandInterpreter(command raftpb.Entry) Command {
 		return Command{CommandIndex: command.Index, CommandTerm: command.Term, Command: Op{Type: EntryNormal, Data: command.Data}}
 	}
 	if req.Put != nil {
-		return Command{CommandIndex: command.Index, CommandTerm: command.Term, Command: Op{Type: EntryKVPut, Key: req.Put.Key, Value: req.Put.Value, Data: command.Data}}
+		data, _ := (req.Put).Marshal()
+		return Command{CommandIndex: command.Index, CommandTerm: command.Term, Command: Op{Type: EntryKVPut, Key: req.Put.Key, Value: req.Put.Value, Data: data}}
 	}
 	return Command{CommandIndex: command.Index, CommandTerm: command.Term, Command: Op{Type: EntryNormal, Data: command.Data}}
 }
