@@ -548,6 +548,7 @@ func (s *Simulation) CheckClientReplyMessage(reply interface{}, req interface{})
 
 func (s *Simulation) HandleClientRequest(req interface{}) {
 	s.ClientBuffer = append(s.ClientBuffer, ClientEntry{Req: req, Index: s.ClientRequestHandler(ClientRequestInterpreter(req))})
+	log.Printf("!!!!!!!client req: %+v\n local state: %+v\n", req, s)
 	return
 }
 
@@ -743,6 +744,7 @@ func (s *Simulation) QuorumActive() bool {
 
 //Handler:
 func (s *Simulation) ClientRequestHandler(args Op) uint64 {
+	log.Printf("!!!!!!!!client req: %+v\n", args)
 	if s.State == Leader {
 		if args.Type == EntryKVRO {
 			for i := 0; i < len(s.peers); i++ {
