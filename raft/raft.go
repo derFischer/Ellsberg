@@ -25,8 +25,6 @@ import (
 	"sync"
 	"time"
 
-	"go.etcd.io/etcd/v3/etcdserver/etcdserverpb"
-
 	"go.etcd.io/etcd/v3/raft/confchange"
 	"go.etcd.io/etcd/v3/raft/quorum"
 	pb "go.etcd.io/etcd/v3/raft/raftpb"
@@ -1033,9 +1031,9 @@ func stepLeader(r *raft, m pb.Message) error {
 		})
 		return nil
 	case pb.MsgProp:
-		reque := new(etcdserverpb.InternalRaftRequest)
-		reque.Unmarshal(m.Entries[0].Data)
-		r.logger.Infof("%x receives propose %+v\n", r.id, reque)
+		// reque := new(etcdserverpb.InternalRaftRequest)
+		// reque.Unmarshal(m.Entries[0].Data)
+		// r.logger.Infof("%x receives propose %+v\n", r.id, reque)
 		if len(m.Entries) == 0 {
 			r.logger.Panicf("%x stepped empty MsgProp", r.id)
 		}
