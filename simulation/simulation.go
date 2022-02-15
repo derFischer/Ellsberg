@@ -439,8 +439,7 @@ func CommandsInterpreter(commands []raftpb.Entry) []Command {
 //}
 //
 func PutRequestInterpreter(req *pb.PutRequest) Op {
-	r := pb.InternalRaftRequest{Put: req}
-	data, err := r.Marshal()
+	data, err := req.Marshal()
 	if err != nil {
 		log.Fatalf("put request interpreter marshal failed: %+v\n", req)
 	}
