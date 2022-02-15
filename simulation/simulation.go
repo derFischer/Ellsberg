@@ -837,8 +837,10 @@ func (s *Simulation) AppendEntryReplyHandler(reply AppendEntriesReply) {
 	}
 	s.UpdateTerm(reply.mterm)
 	if reply.msuccess {
-		s.mmatchIndex[inSlice(s.peers, reply.From)] = max(reply.mmatchIndex, s.mmatchIndex[inSlice(s.peers, reply.From)])
-		s.updateCommitIndex()
+		if reply.mmatchIndex != HEARTBEAT {
+			s.mmatchIndex[inSlice(s.peers, reply.From)] = max(reply.mmatchIndex, s.mmatchIndex[inSlice(s.peers, reply.From)])
+			s.updateCommitIndex()
+		}
 	}
 	return
 }
