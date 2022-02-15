@@ -41,6 +41,10 @@ const (
 	NONEXIST  = math.MaxInt64 - 1
 )
 
+const (
+	HEARTBEAT = math.MaxInt64
+)
+
 const NOONE = math.MaxInt64 - 1
 
 type EntryType int32
@@ -367,7 +371,7 @@ func (s *Simulation) logMatch(l []Command) bool {
 			continue
 		}
 		if cmd.Command.Data != nil {
-			log.Printf("!!!!!!!!!!!!!!!!!!!!entry content different: local: %+v\n, compared: %+v\n", local_cmd, cmd)
+			// log.Printf("!!!!!!!!!!!!!!!!!!!!entry content different: local: %+v\n, compared: %+v\n", local_cmd, cmd)
 			return false
 		}
 		s.InsertEmtpy(cmd)
@@ -420,7 +424,7 @@ func CommandInterpreter(command raftpb.Entry) Command {
 	}
 	if req.Put != nil {
 		data, _ := (req.Put).Marshal()
-		log.Printf("!!!!!!!!!!!!!!!!!the request is: %+v\n, the bytes are: %+v\n", req.Put, data)
+		// log.Printf("!!!!!!!!!!!!!!!!!the request is: %+v\n, the bytes are: %+v\n", req.Put, data)
 		return Command{CommandIndex: command.Index, CommandTerm: command.Term, Command: Op{Type: EntryKVPut, Key: req.Put.Key, Value: req.Put.Value, Data: data}}
 	}
 	return Command{CommandIndex: command.Index, CommandTerm: command.Term, Command: Op{Type: EntryNormal, Data: command.Data}}
@@ -503,7 +507,7 @@ func (s *Simulation) MsgInterpreter(msg raftpb.Message) interface{} {
 	case raftpb.MsgHeartbeat:
 		return AppendEntriesArgs{From: msg.From, mterm: msg.Term, mprevLogIndex: s.getLastCommandIndex(), mprevLogTerm: s.getLastCommandTerm(), mentries: []Command{}, mcommitIndex: msg.Commit}
 	case raftpb.MsgHeartbeatResp:
-		return AppendEntriesReply{From: msg.From, mterm: msg.Term, msuccess: !msg.Reject, mmatchIndex: msg.Index}
+		return AppendEntriesReply{From: msg.From, mterm: msg.Term, msuccess: !msg.Reject, mmatchIndex: HEARTBEAT}
 	}
 	return nil
 }
@@ -550,7 +554,8 @@ func (s *Simulation) CheckClientReplyMessage(reply interface{}, req interface{})
 
 func (s *Simulation) HandleClientRequest(req interface{}) {
 	s.ClientBuffer = append(s.ClientBuffer, ClientEntry{Req: req, Index: s.ClientRequestHandler(ClientRequestInterpreter(req))})
-	log.Printf("!!!!!!!client req: %+v\n local state: %+v\n", req, s)
+	s.Truncate()
+	// log.Printf("!!!!!!!client req: %+v\n local state: %+v\n", req, s)
 	return
 }
 
@@ -564,12 +569,13 @@ func (s *Simulation) HandleRaftReqMessages(msg raftpb.Message) interface{} {
 		s.ClientRequestHandler(Op{Type: EntryNormal, Data: msg.Entries[0].Data})
 	case raftpb.MsgVote:
 		r := s.RequestVoteRequestHandler(s.MsgInterpreter(msg).(RequestVoteArgs))
-		log.Printf("receives MsgVote: %+v, after interpreter: %+v, reply: %+v\n", msg, s.MsgInterpreter(msg).(RequestVoteArgs), r)
+		// log.Printf("receives MsgVote: %+v, after interpreter: %+v, reply: %+v\n", msg, s.MsgInterpreter(msg).(RequestVoteArgs), r)
 		return r
 		// s.RaftBuffer = append(s.RaftBuffer, r)
 	case raftpb.MsgApp:
 		r := s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs))
-		log.Printf("receives MsgApp: %+v, after interpreter: %+v, reply: %+v\n", msg, s.MsgInterpreter(msg).(AppendEntriesArgs), s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs)))
+		s.Truncate()
+		// log.Printf("receives MsgApp: %+v, after interpreter: %+v, reply: %+v\n", msg, s.MsgInterpreter(msg).(AppendEntriesArgs), s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs)))
 		return r
 		// s.RaftBuffer = append(s.RaftBuffer, r)
 	case raftpb.MsgHeartbeat:
@@ -668,20 +674,16 @@ func (s *Simulation) BecomeLeaderChecker() bool {
 
 func (s *Simulation) RequestVoteReplyChecker(r_exec RequestVoteReply, r_sl RequestVoteReply) bool {
 	// return s.searchInRaftBuffer(r_exec)
-	r := (r_exec == r_sl)
-	if !r {
-		log.Printf("!!!!!!!!!requestvotereplychecker failed. exec: %+v\n sl: %+v\n", r_exec, r_sl)
-	}
-	return r
+	// r := (r_exec == r_sl)
+	// if !r {
+	// 	log.Printf("!!!!!!!!!requestvotereplychecker failed. exec: %+v\n sl: %+v\n", r_exec, r_sl)
+	// }
+	return r_exec == r_sl
 }
 
 func (s *Simulation) AppendEntryReplyChecker(r_exec AppendEntriesReply, r_sl AppendEntriesReply) bool {
 	// return s.searchInRaftBuffer(r_exec)
-	r := (r_exec.From == r_sl.From) && (r_exec.mterm == r_sl.mterm) && (r_exec.msuccess == r_sl.msuccess) && (r_exec.mmatchIndex <= r_sl.mmatchIndex)
-	if !r {
-		log.Printf("!!!!!!!!!appendentryreplychecker failed. exec: %+v\n sl: %+v\n", r_exec, r_sl)
-	}
-	return r
+	return (r_exec.From == r_sl.From) && (r_exec.mterm == r_sl.mterm) && (r_exec.msuccess == r_sl.msuccess) && ((r_exec.mmatchIndex == r_sl.mmatchIndex) || r_exec.mmatchIndex == uint64(HEARTBEAT))
 }
 
 //func (s *Simulation) GetReplyChecker(args Op, reply GetReply) bool {
@@ -746,7 +748,7 @@ func (s *Simulation) QuorumActive() bool {
 
 //Handler:
 func (s *Simulation) ClientRequestHandler(args Op) uint64 {
-	log.Printf("!!!!!!!!client req: %+v\n", args)
+	// log.Printf("!!!!!!!!client req: %+v\n", args)
 	if s.State == Leader {
 		if args.Type == EntryKVRO {
 			for i := 0; i < len(s.peers); i++ {
@@ -779,7 +781,7 @@ func (s *Simulation) RequestVoteRequestHandler(args RequestVoteArgs) RequestVote
 	}
 	r.mterm = s.CurrentTerm
 	r.mvoteGranted = grant
-	log.Printf("server %d receives vote request, args: %+v\n, local: %+v\n, reply: %+v\n", s.me, args, s, r)
+	// log.Printf("server %d receives vote request, args: %+v\n, local: %+v\n, reply: %+v\n", s.me, args, s, r)
 	return r
 }
 
@@ -842,6 +844,20 @@ func (s *Simulation) AppendEntryReplyHandler(reply AppendEntriesReply) {
 }
 
 //other functions
+func (s *Simulation) Truncate() {
+	if len(s.Log) <= 100 {
+		return
+	}
+	local_index := s.getCurrentIndex(s.CommitIndex)
+	if local_index == TRUNCATED {
+		log.Fatal("The last committed entry has been truncated, incorrect!\n")
+	}
+	if local_index == NONEXIST {
+		log.Fatal("The commit index is larger than the end of the log!\n")
+	}
+	s.Log = s.Log[local_index:]
+}
+
 func (s *Simulation) DropStaleResponse(mterm uint64) bool {
 	if mterm < s.CurrentTerm {
 		return true

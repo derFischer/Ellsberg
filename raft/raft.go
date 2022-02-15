@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -644,7 +643,6 @@ func (r *raft) reset(term uint64) {
 }
 
 func (r *raft) appendEntry(es ...pb.Entry) (accepted bool) {
-	debug.PrintStack()
 	li := r.raftLog.lastIndex()
 	for i := range es {
 		es[i].Term = r.Term

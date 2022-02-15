@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
-	"log"
 	"time"
 
 	"go.etcd.io/etcd/v3/auth"
@@ -140,14 +139,14 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 
 func (s *EtcdServer) Put(ctx context.Context, r *pb.PutRequest) (*pb.PutResponse, error) {
 	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: false, Type: simulationpb.ClientMsg, Msg: r})
-	d, _ := r.Marshal()
-	log.Printf("!!!!!!!!!!!!!!!!!!!!!!request before process: %+v\n", d)
+	// d, _ := r.Marshal()
+	// log.Printf("!!!!!!!!!!!!!!!!!!!!!!request before process: %+v\n", d)
 	ctx = context.WithValue(ctx, traceutil.StartTimeKey, time.Now())
 	resp, err := s.raftRequest(ctx, pb.InternalRaftRequest{Put: r})
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("!!!!!!!!!!!!!!!!!!!!!!request after process: %+v\n", r)
+	// log.Printf("!!!!!!!!!!!!!!!!!!!!!!request after process: %+v\n", r)
 	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: true, Type: simulationpb.ClientMsg, Msg: resp, Req: r})
 	return resp.(*pb.PutResponse), nil
 }
@@ -688,7 +687,7 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 	defer cancel()
 
 	start := time.Now()
-	log.Printf("!!!!!!!!!!!!!!!!!!!put request before propose: %+v\n", r.Put)
+	// log.Printf("!!!!!!!!!!!!!!!!!!!put request before propose: %+v\n", r.Put)
 	err = s.r.Propose(cctx, data)
 	if err != nil {
 		proposalsFailed.Inc()

@@ -17,7 +17,6 @@ package raft
 import (
 	"context"
 	"errors"
-	"runtime/debug"
 
 	pb "go.etcd.io/etcd/v3/raft/raftpb"
 	"go.etcd.io/etcd/v3/simulationpb"
@@ -471,7 +470,6 @@ func (n *node) stepWithWaitOption(ctx context.Context, m pb.Message, wait bool) 
 			return ErrStopped
 		}
 	}
-	debug.PrintStack()
 	ch := n.propc
 	pm := msgWithResult{m: m}
 	if wait {
