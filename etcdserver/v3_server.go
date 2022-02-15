@@ -140,7 +140,8 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 
 func (s *EtcdServer) Put(ctx context.Context, r *pb.PutRequest) (*pb.PutResponse, error) {
 	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: false, Type: simulationpb.ClientMsg, Msg: r})
-	log.Printf("!!!!!!!!!!!!!!!!!!!!!!request before process: %+v\n", r)
+	d, _ := r.Marshal()
+	log.Printf("!!!!!!!!!!!!!!!!!!!!!!request before process: %+v\n", d)
 	ctx = context.WithValue(ctx, traceutil.StartTimeKey, time.Now())
 	resp, err := s.raftRequest(ctx, pb.InternalRaftRequest{Put: r})
 	if err != nil {
