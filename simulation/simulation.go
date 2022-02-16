@@ -799,7 +799,7 @@ func (s *Simulation) ClientRequestHandler(args Op) uint64 {
 }
 
 func (s *Simulation) RequestVoteRequestHandler(args RequestVoteArgs) RequestVoteReply {
-	r := RequestVoteReply{From: s.me}
+	r := RequestVoteReply{From: s.me, To: args.From}
 	if s.DropStaleResponse(args.mterm) {
 		r.mterm = s.CurrentTerm
 		r.mvoteGranted = false
@@ -818,7 +818,7 @@ func (s *Simulation) RequestVoteRequestHandler(args RequestVoteArgs) RequestVote
 }
 
 func (s *Simulation) AppendEntryRequestHandler(args AppendEntriesArgs) AppendEntriesReply {
-	r := AppendEntriesReply{From: s.me}
+	r := AppendEntriesReply{From: s.me, To: args.From}
 	if s.DropStaleResponse(args.mterm) {
 		r.mterm = s.CurrentTerm
 		r.msuccess = false
