@@ -706,10 +706,10 @@ func (s *Simulation) BecomeLeaderChecker() bool {
 
 func (s *Simulation) RequestVoteReplyChecker(r_exec RequestVoteReply, r_sl RequestVoteReply) bool {
 	// return s.searchInRaftBuffer(r_exec)
-	// r := (r_exec == r_sl)
-	// if !r {
-	// 	log.Printf("!!!!!!!!!requestvotereplychecker failed. exec: %+v\n sl: %+v\n", r_exec, r_sl)
-	// }
+	r := (r_exec == r_sl)
+	if !r {
+		log.Printf("!!!!!!!!!requestvotereplychecker failed. exec: %+v\n sl: %+v\n", r_exec, r_sl)
+	}
 	return r_exec == r_sl
 }
 
