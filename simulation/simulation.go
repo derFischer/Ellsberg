@@ -2,6 +2,7 @@ package simulation
 
 import (
 	"bytes"
+	"fmt"
 	"log"
 	"math"
 	"reflect"
@@ -203,12 +204,14 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 			case msg := <-sl.MsgCh:
 				if msg.Send {
 					if msg.Type == simulationpb.ClientMsg {
+						fmt.Printf("!!!!!!!!!!!simulation tries to check client request: %+v\n", msg)
 						sl.CheckClientReplyMessage(msg.Msg, msg.Req)
 					} else {
 						sl.CheckRaftMessage(msg.Msg.(raftpb.Message), msg.Req)
 					}
 				} else {
 					if msg.Type == simulationpb.ClientMsg {
+						fmt.Printf("!!!!!!!!!!!simulation starts to handle client request: %+v\n", msg)
 						sl.HandleClientRequest(msg.Msg)
 					} else {
 						sl.HandleRaftMessages(msg.Msg.(raftpb.Message))
