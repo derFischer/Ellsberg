@@ -5,6 +5,7 @@ import (
 	"log"
 	"math"
 	"reflect"
+	"runtime/debug"
 	"sort"
 	"sync"
 
@@ -1053,6 +1054,7 @@ func inSlice(s []uint64, e uint64) int {
 			return i
 		}
 	}
+	debug.PrintStack()
 	log.Fatalf("value %d doesn't exist in the array %+v\n", e, s)
 	return -1
 }
