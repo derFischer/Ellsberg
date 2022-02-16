@@ -64,33 +64,44 @@ const (
 	ConfChange RespType = 2
 )
 
+//raft msgs
+type Ctx interface{}
+
 type RequestVoteArgs struct {
 	From          uint64
+	To            uint64
 	mterm         uint64
 	mlastLogIndex uint64
 	mlastLogTerm  uint64
+	ctx           Ctx
 }
 
 type RequestVoteReply struct {
 	From         uint64
+	To           uint64
 	mterm        uint64
 	mvoteGranted bool
+	ctx          Ctx
 }
 
 type AppendEntriesArgs struct {
 	From          uint64
+	To            uint64
 	mterm         uint64
 	mprevLogIndex uint64
 	mprevLogTerm  uint64
 	mentries      []Command
 	mcommitIndex  uint64
+	ctx           Ctx
 }
 
 type AppendEntriesReply struct {
 	From        uint64
+	To          uint64
 	mterm       uint64
 	msuccess    bool
 	mmatchIndex uint64
+	ctx         Ctx
 }
 
 type Command struct {
@@ -131,18 +142,19 @@ type ClientEntry struct {
 // A Go object implementing a single Raft peer.
 //
 type Simulation struct {
-	mu          sync.Mutex // Lock to protect shared access to this peer's state
-	me          uint64
-	State       StateType
-	CurrentTerm uint64
-	VotedFor    uint64
-	Votes       []bool
-	Log         []Command
-	CommitIndex uint64
-	mmatchIndex []uint64
-	peers       []uint64
-	Alive       []bool
-	MsgCh       chan simulationpb.Msg
+	mu            sync.Mutex // Lock to protect shared access to this peer's state
+	me            uint64
+	State         StateType
+	CurrentTerm   uint64
+	VotedFor      uint64
+	Votes         []bool
+	Log           []Command
+	CommitIndex   uint64
+	mmatchIndex   []uint64
+	peers         []uint64
+	Alive         []bool
+	CheckAliveCtx map[uint64][]Ctx
+	MsgCh         chan simulationpb.Msg
 
 	// RaftBuffer   []interface{}
 	ClientBuffer []ClientEntry
@@ -152,14 +164,16 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	total := len(peers)
 	votes := make([]bool, total)
 	alive := make([]bool, total)
+	matchIndex := make([]uint64, total)
+	checkAliveCtx := make(map[uint64][]Ctx)
+
 	for i := 0; i < total; i++ {
 		votes[i] = false
 		alive[i] = false
-	}
-	matchIndex := make([]uint64, total)
-	for i := 0; i < total; i++ {
 		matchIndex[i] = 0
+		checkAliveCtx[peers[i]] = make([]Ctx, 0)
 	}
+
 	//hack the initial state
 	log := make([]Command, 4)
 	log[0] = Command{CommandIndex: 0}
@@ -173,6 +187,7 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	sl.VotedFor = NOONE
 	sl.Votes = votes
 	sl.Alive = alive
+	sl.CheckAliveCtx = checkAliveCtx
 	sl.Log = log
 	sl.CommitIndex = 0
 	sl.mmatchIndex = matchIndex
@@ -494,45 +509,47 @@ func ClientResponseInterpreter(index uint64, resp interface{}) Resp {
 //	return AppendEntriesReply{From: reply.From, mterm: reply.Term, msuccess: reply.Success}
 //}
 
-func (s *Simulation) MsgInterpreter(msg raftpb.Message) interface{} {
+func (s *Simulation) MsgInterpreter(msg raftpb.Message) (interface{}, uint64, uint64, Ctx) {
 	switch msg.Type {
 	case raftpb.MsgApp:
-		return AppendEntriesArgs{From: msg.From, mterm: msg.Term, mprevLogIndex: msg.Index, mprevLogTerm: msg.LogTerm, mentries: CommandsInterpreter(msg.Entries), mcommitIndex: msg.Commit}
+		return AppendEntriesArgs{From: msg.From, To: msg.To, mterm: msg.Term, mprevLogIndex: msg.Index, mprevLogTerm: msg.LogTerm, mentries: CommandsInterpreter(msg.Entries), mcommitIndex: msg.Commit}, msg.From, msg.To, nil
 	case raftpb.MsgAppResp:
-		return AppendEntriesReply{From: msg.From, mterm: msg.Term, msuccess: !msg.Reject, mmatchIndex: msg.Index}
+		return AppendEntriesReply{From: msg.From, To: msg.To, mterm: msg.Term, msuccess: !msg.Reject, mmatchIndex: msg.Index}, msg.From, msg.To, nil
 	case raftpb.MsgVote:
-		return RequestVoteArgs{From: msg.From, mterm: msg.Term, mlastLogIndex: msg.Index, mlastLogTerm: msg.LogTerm}
+		return RequestVoteArgs{From: msg.From, To: msg.To, mterm: msg.Term, mlastLogIndex: msg.Index, mlastLogTerm: msg.LogTerm}, msg.From, msg.To, nil
 	case raftpb.MsgVoteResp:
-		return RequestVoteReply{From: msg.From, mterm: msg.Term, mvoteGranted: !msg.Reject}
+		return RequestVoteReply{From: msg.From, To: msg.To, mterm: msg.Term, mvoteGranted: !msg.Reject}, msg.From, msg.To, nil
 	case raftpb.MsgHeartbeat:
-		return AppendEntriesArgs{From: msg.From, mterm: msg.Term, mprevLogIndex: s.getLastCommandIndex(), mprevLogTerm: s.getLastCommandTerm(), mentries: []Command{}, mcommitIndex: msg.Commit}
+		return AppendEntriesArgs{From: msg.From, To: msg.To, mterm: msg.Term, mprevLogIndex: s.getLastCommandIndex(), mprevLogTerm: s.getLastCommandTerm(), mentries: []Command{}, mcommitIndex: msg.Commit, ctx: msg.Context}, msg.From, msg.To, msg.Context
 	case raftpb.MsgHeartbeatResp:
-		return AppendEntriesReply{From: msg.From, mterm: msg.Term, msuccess: !msg.Reject, mmatchIndex: HEARTBEAT}
+		return AppendEntriesReply{From: msg.From, To: msg.To, mterm: msg.Term, msuccess: !msg.Reject, mmatchIndex: HEARTBEAT, ctx: msg.Context}, msg.From, msg.To, msg.Context
 	}
-	return nil
+	return nil, 0, 0, nil
 }
 
 //call From the upper layer
 //checker function: check whether the messages are valid before actually send them out
 func (s *Simulation) CheckRaftMessage(msg raftpb.Message, req interface{}) {
 	valid := true
+	msg_itp, _, to, ctx := s.MsgInterpreter(msg)
+	s.ConnectionCtx(to, ctx)
 	switch msg.Type {
 	case raftpb.MsgVote:
-		valid = s.RequestVoteRequestChecker(s.MsgInterpreter(msg).(RequestVoteArgs))
+		valid = s.RequestVoteRequestChecker(msg_itp.(RequestVoteArgs))
 	case raftpb.MsgApp:
-		valid = s.AppendEntryRequestChecker(s.MsgInterpreter(msg).(AppendEntriesArgs))
+		valid = s.AppendEntryRequestChecker(msg_itp.(AppendEntriesArgs))
 	case raftpb.MsgHeartbeat:
-		valid = s.AppendEntryRequestChecker(s.MsgInterpreter(msg).(AppendEntriesArgs))
+		valid = s.AppendEntryRequestChecker(msg_itp.(AppendEntriesArgs))
 	case raftpb.MsgVoteResp:
 		// r := s.HandleRaftReqMessages(req.(raftpb.Message)).(RequestVoteReply)
-		valid = s.RequestVoteReplyChecker(s.MsgInterpreter(msg).(RequestVoteReply), s.HandleRaftReqMessages(req.(raftpb.Message)).(RequestVoteReply))
+		valid = s.RequestVoteReplyChecker(msg_itp.(RequestVoteReply), s.HandleRaftReqMessages(req.(raftpb.Message)).(RequestVoteReply))
 		// if !valid {
 		// 	log.Fatalf("check request message error! server: %d, args: %+v\n local state: %+v\n, reply_impl: %+v\n, reply_sl: %+v\n", s.me, req, s, msg, r)
 		// }
 	case raftpb.MsgAppResp:
-		valid = s.AppendEntryReplyChecker(s.MsgInterpreter(msg).(AppendEntriesReply), s.HandleRaftReqMessages(req.(raftpb.Message)).(AppendEntriesReply))
+		valid = s.AppendEntryReplyChecker(msg_itp.(AppendEntriesReply), s.HandleRaftReqMessages(req.(raftpb.Message)).(AppendEntriesReply))
 	case raftpb.MsgHeartbeatResp:
-		valid = s.AppendEntryReplyChecker(s.MsgInterpreter(msg).(AppendEntriesReply), s.HandleRaftReqMessages(req.(raftpb.Message)).(AppendEntriesReply))
+		valid = s.AppendEntryReplyChecker(msg_itp.(AppendEntriesReply), s.HandleRaftReqMessages(req.(raftpb.Message)).(AppendEntriesReply))
 	}
 	if !valid {
 		log.Fatalf("check request message error! server: %d, msg: %+v\n req: %+v\n local state: %+v\n", s.me, msg, req, s)
@@ -560,7 +577,8 @@ func (s *Simulation) HandleClientRequest(req interface{}) {
 }
 
 func (s *Simulation) HandleRaftReqMessages(msg raftpb.Message) interface{} {
-	s.ConnectionAlive(msg)
+	msg_itp, from, _, ctx := s.MsgInterpreter(msg)
+	s.ConnectionAlive(from, ctx)
 	switch msg.Type {
 	case raftpb.MsgProp:
 		if msg.Entries[0].Type != raftpb.EntryNormal {
@@ -568,32 +586,33 @@ func (s *Simulation) HandleRaftReqMessages(msg raftpb.Message) interface{} {
 		}
 		s.ClientRequestHandler(Op{Type: EntryNormal, Data: msg.Entries[0].Data})
 	case raftpb.MsgVote:
-		r := s.RequestVoteRequestHandler(s.MsgInterpreter(msg).(RequestVoteArgs))
+		r := s.RequestVoteRequestHandler(msg_itp.(RequestVoteArgs))
 		// log.Printf("receives MsgVote: %+v, after interpreter: %+v, reply: %+v\n", msg, s.MsgInterpreter(msg).(RequestVoteArgs), r)
 		return r
 		// s.RaftBuffer = append(s.RaftBuffer, r)
 	case raftpb.MsgApp:
-		r := s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs))
+		r := s.AppendEntryRequestHandler(msg_itp.(AppendEntriesArgs))
 		s.Truncate()
 		// log.Printf("receives MsgApp: %+v, after interpreter: %+v, reply: %+v\n", msg, s.MsgInterpreter(msg).(AppendEntriesArgs), s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs)))
 		return r
 		// s.RaftBuffer = append(s.RaftBuffer, r)
 	case raftpb.MsgHeartbeat:
-		r := s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs))
+		r := s.AppendEntryRequestHandler(msg_itp.(AppendEntriesArgs))
 		return r
 	}
 	return nil
 }
 
 func (s *Simulation) HandleRaftMessages(msg raftpb.Message) interface{} {
-	s.ConnectionAlive(msg)
+	msg_itp, from, _, ctx := s.MsgInterpreter(msg)
+	s.ConnectionAlive(from, ctx)
 	switch msg.Type {
 	case raftpb.MsgVoteResp:
-		s.RequestVoteReplyHandler(s.MsgInterpreter(msg).(RequestVoteReply))
+		s.RequestVoteReplyHandler(msg_itp.(RequestVoteReply))
 	case raftpb.MsgAppResp:
-		s.AppendEntryReplyHandler(s.MsgInterpreter(msg).(AppendEntriesReply))
+		s.AppendEntryReplyHandler(msg_itp.(AppendEntriesReply))
 	case raftpb.MsgHeartbeatResp:
-		s.AppendEntryReplyHandler(s.MsgInterpreter(msg).(AppendEntriesReply))
+		s.AppendEntryReplyHandler(msg_itp.(AppendEntriesReply))
 	}
 	return nil
 }
@@ -620,8 +639,21 @@ func (s *Simulation) HandleRaftMessages(msg raftpb.Message) interface{} {
 // 	}
 // }
 
-func (s *Simulation) ConnectionAlive(msg raftpb.Message) {
-	s.Alive[inSlice(s.peers, msg.From)] = true
+func (s *Simulation) ConnectionCtx(id uint64, ctx Ctx) {
+	if ctx == nil {
+		return
+	}
+	s.searchConnectionCtx(id, ctx, true)
+}
+
+func (s *Simulation) ConnectionAlive(id uint64, ctx Ctx) {
+	if ctx == nil {
+		return
+	}
+	found := s.searchConnectionCtx(id, ctx, false)
+	if found {
+		s.Alive[inSlice(s.peers, id)] = true
+	}
 }
 
 //checker: check whether the message is correct
@@ -948,6 +980,20 @@ func (s *Simulation) searchInClientBuffer(e interface{}) (bool, uint64) {
 		}
 	}
 	return false, 0
+}
+
+func (s *Simulation) searchConnectionCtx(id uint64, ctx Ctx, add bool) bool {
+	connection := s.CheckAliveCtx[id]
+	for i := 0; i < len(connection); i++ {
+		c := connection[i]
+		if reflect.DeepEqual(c, ctx) {
+			return true
+		}
+	}
+	if add {
+		s.CheckAliveCtx[id] = append(connection, ctx)
+	}
+	return false
 }
 
 //hack function
