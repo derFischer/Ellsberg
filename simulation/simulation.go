@@ -783,9 +783,10 @@ func (s *Simulation) ClientRequestHandler(args Op) uint64 {
 	// log.Printf("!!!!!!!!client req: %+v\n", args)
 	if s.State == Leader {
 		if args.Type == EntryKVRO {
-			for i := 0; i < len(s.peers); i++ {
-				s.Alive[i] = false
-			}
+			s.clearConnection()
+			// for i := 0; i < len(s.peers); i++ {
+			// 	s.Alive[i] = false
+			// }
 			return s.CommitIndex
 		} else {
 			index := s.getLastCommandIndex() + 1
@@ -994,6 +995,14 @@ func (s *Simulation) searchConnectionCtx(id uint64, ctx Ctx, add bool) bool {
 		s.CheckAliveCtx[id] = append(connection, ctx)
 	}
 	return false
+}
+
+func (s *Simulation) clearConnection() {
+	total := len(s.peers)
+	for i := 0; i < total; i++ {
+		s.Alive[i] = false
+		s.CheckAliveCtx[s.peers[i]] = make([]Ctx, 0)
+	}
 }
 
 //hack function
