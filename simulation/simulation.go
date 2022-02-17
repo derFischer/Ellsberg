@@ -688,7 +688,7 @@ func (s *Simulation) InitializeCtx(ctx Ctx) {
 	}
 	for i := 0; i < len(s.ClientROBuffer); i++ {
 		entry := s.ClientROBuffer[i]
-		s.ClientOtherBuffer[i] = ClientEntry{Req: entry.Req, Index: entry.Index, Ctxs: append(entry.Ctxs, ctx)}
+		s.ClientROBuffer[i] = ClientEntry{Req: entry.Req, Index: entry.Index, Ctxs: append(entry.Ctxs, ctx)}
 	}
 }
 
