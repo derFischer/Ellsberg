@@ -829,7 +829,7 @@ func (s *Simulation) QuorumActive(ctxs []Ctx) bool {
 			}
 		}
 	}
-	return len(connected_peers) > len(s.peers)/2
+	return (len(connected_peers) + 1) > len(s.peers)/2
 }
 
 //Handler:
