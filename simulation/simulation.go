@@ -68,6 +68,11 @@ const (
 //raft msgs
 type Ctx interface{}
 
+type Connection struct {
+	ref int
+	ids []uint64
+}
+
 type RequestVoteArgs struct {
 	From          uint64
 	To            uint64
@@ -123,6 +128,7 @@ type Resp struct {
 	Index uint64
 	Key   []byte
 	Value []byte
+	ctxs  []Ctx
 }
 
 type GetReply struct {
@@ -137,40 +143,41 @@ type PutAppendReply struct {
 type ClientEntry struct {
 	Req   interface{}
 	Index uint64
+	Ctxs  []Ctx
 }
 
 //
 // A Go object implementing a single Raft peer.
 //
 type Simulation struct {
-	mu            sync.Mutex // Lock to protect shared access to this peer's state
-	me            uint64
-	State         StateType
-	CurrentTerm   uint64
-	VotedFor      uint64
-	Votes         []bool
-	Log           []Command
-	CommitIndex   uint64
-	mmatchIndex   []uint64
-	peers         []uint64
-	Alive         []bool
-	CheckAliveCtx map[uint64][]Ctx
-	MsgCh         chan simulationpb.Msg
+	mu          sync.Mutex // Lock to protect shared access to this peer's state
+	me          uint64
+	State       StateType
+	CurrentTerm uint64
+	VotedFor    uint64
+	Votes       []bool
+	Log         []Command
+	CommitIndex uint64
+	mmatchIndex []uint64
+	peers       []uint64
+	Connections map[Ctx]Connection
+	// CheckAliveCtx     map[uint64][]Ctx
+	MsgCh chan simulationpb.Msg
 
 	// RaftBuffer   []interface{}
-	ClientBuffer []ClientEntry
+	ClientROBuffer    []ClientEntry
+	ClientOtherBuffer []ClientEntry
 }
 
 func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	total := len(peers)
 	votes := make([]bool, total)
-	alive := make([]bool, total)
+	alive := make(map[Ctx]Connection)
 	matchIndex := make([]uint64, total)
 	checkAliveCtx := make(map[uint64][]Ctx)
 
 	for i := 0; i < total; i++ {
 		votes[i] = false
-		alive[i] = false
 		matchIndex[i] = 0
 		checkAliveCtx[peers[i]] = make([]Ctx, 0)
 	}
@@ -187,8 +194,8 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	sl.CurrentTerm = 1
 	sl.VotedFor = NOONE
 	sl.Votes = votes
-	sl.Alive = alive
-	sl.CheckAliveCtx = checkAliveCtx
+	sl.Connections = alive
+	// sl.CheckAliveCtx = checkAliveCtx
 	sl.Log = log
 	sl.CommitIndex = 0
 	sl.mmatchIndex = matchIndex
@@ -196,7 +203,8 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	sl.MsgCh = make(chan simulationpb.Msg)
 
 	// sl.RaftBuffer = make([]interface{}, 0)
-	sl.ClientBuffer = make([]ClientEntry, 0)
+	sl.ClientROBuffer = make([]ClientEntry, 0)
+	sl.ClientOtherBuffer = make([]ClientEntry, 0)
 
 	go func() {
 		for {
@@ -223,35 +231,35 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	return sl
 }
 
-func NewSL(id uint64, peers []uint64) *Simulation {
-	total := len(peers)
-	votes := make([]bool, total)
-	alive := make([]bool, total)
-	for i := 0; i < total; i++ {
-		votes[i] = false
-		alive[i] = false
-	}
-	matchIndex := make([]uint64, total)
-	for i := 0; i < total; i++ {
-		matchIndex[i] = 0
-	}
-	//hack the initial state
-	log := make([]Command, 9)
-	log[0] = Command{CommandIndex: 0}
-	log[8] = Command{CommandIndex: 8}
-	return &Simulation{
-		me:          id,
-		State:       Follower,
-		CurrentTerm: 0,
-		VotedFor:    NOONE,
-		Votes:       votes,
-		Alive:       alive,
-		Log:         log,
-		CommitIndex: 0,
-		mmatchIndex: matchIndex,
-		peers:       peers,
-	}
-}
+// func NewSL(id uint64, peers []uint64) *Simulation {
+// 	total := len(peers)
+// 	votes := make([]bool, total)
+// 	alive := make([]bool, total)
+// 	for i := 0; i < total; i++ {
+// 		votes[i] = false
+// 		alive[i] = false
+// 	}
+// 	matchIndex := make([]uint64, total)
+// 	for i := 0; i < total; i++ {
+// 		matchIndex[i] = 0
+// 	}
+// 	//hack the initial state
+// 	log := make([]Command, 9)
+// 	log[0] = Command{CommandIndex: 0}
+// 	log[8] = Command{CommandIndex: 8}
+// 	return &Simulation{
+// 		me:          id,
+// 		State:       Follower,
+// 		CurrentTerm: 0,
+// 		VotedFor:    NOONE,
+// 		Votes:       votes,
+// 		Alive:       alive,
+// 		Log:         log,
+// 		CommitIndex: 0,
+// 		mmatchIndex: matchIndex,
+// 		peers:       peers,
+// 	}
+// }
 
 //helper function
 func Equal(arg1 uint64, arg2 uint64) bool {
@@ -479,12 +487,12 @@ func ClientRequestInterpreter(req interface{}) Op {
 	}
 }
 
-func ClientResponseInterpreter(index uint64, resp interface{}) Resp {
+func ClientResponseInterpreter(ce ClientEntry, resp interface{}) Resp {
 	switch resp.(type) {
 	case *pb.RangeResponse:
-		return Resp{Type: ReadResp, Index: index, Key: resp.(*pb.RangeResponse).Kvs[0].Key, Value: resp.(*pb.RangeResponse).Kvs[0].Value}
+		return Resp{Type: ReadResp, Index: ce.Index, Key: resp.(*pb.RangeResponse).Kvs[0].Key, Value: resp.(*pb.RangeResponse).Kvs[0].Value, ctxs: ce.Ctxs}
 	default:
-		return Resp{Type: NormalResp, Index: index}
+		return Resp{Type: NormalResp, Index: ce.Index}
 	}
 }
 
@@ -534,8 +542,8 @@ func (s *Simulation) MsgInterpreter(msg raftpb.Message) (interface{}, uint64, ui
 //checker function: check whether the messages are valid before actually send them out
 func (s *Simulation) CheckRaftMessage(msg raftpb.Message, req interface{}) {
 	valid := true
-	msg_itp, _, to, ctx := s.MsgInterpreter(msg)
-	s.ConnectionCtx(to, ctx)
+	msg_itp, _, _, ctx := s.MsgInterpreter(msg)
+	s.InitializeCtx(ctx)
 	switch msg.Type {
 	case raftpb.MsgVote:
 		valid = s.RequestVoteRequestChecker(msg_itp.(RequestVoteArgs))
@@ -560,20 +568,40 @@ func (s *Simulation) CheckRaftMessage(msg raftpb.Message, req interface{}) {
 }
 
 func (s *Simulation) CheckClientReplyMessage(reply interface{}, req interface{}) {
-	find, index := s.searchInClientBuffer(req)
+	find := false
+	entry := ClientEntry{}
+	switch req.(type) {
+	case *pb.RangeRequest:
+		find, entry = s.searchInClientBuffer(req, EntryKVRO)
+		// return Resp{Type: ReadResp, Index: ce.Index, Key: resp.(*pb.RangeResponse).Kvs[0].Key, Value: resp.(*pb.RangeResponse).Kvs[0].Value, ctxs: ce.Ctxs}
+	default:
+		find, entry = s.searchInClientBuffer(req, EntryNormal)
+	}
+
 	if !find {
 		log.Fatalf("%d haven't received the client req before\n", s.me)
 	}
-	valid := s.ClientReplyChecker(ClientResponseInterpreter(index, reply))
+	valid := s.ClientReplyChecker(ClientResponseInterpreter(entry, reply))
 	if !valid {
-		log.Fatalf("check reply message error! server: %d, index: %d, reply: %+v\n local state: %+v\n", s.me, index, reply, s)
+		log.Fatalf("check reply message error! server: %d, index: %d, reply: %+v\n local state: %+v\n", s.me, entry.Index, reply, s)
+	}
+
+	//clear the ref
+	for _, ctx := range entry.Ctxs {
+		connection := s.Connections[ctx]
+		s.Connections[ctx] = Connection{ref: connection.ref - 1, ids: connection.ids}
 	}
 }
 
 //handler function: update the simulation state once receives the requests
 
 func (s *Simulation) HandleClientRequest(req interface{}) {
-	s.ClientBuffer = append(s.ClientBuffer, ClientEntry{Req: req, Index: s.ClientRequestHandler(ClientRequestInterpreter(req))})
+	switch req.(type) {
+	case *pb.RangeRequest:
+		s.ClientROBuffer = append(s.ClientROBuffer, ClientEntry{Req: req, Index: s.ClientRequestHandler(ClientRequestInterpreter(req))})
+	default:
+		s.ClientOtherBuffer = append(s.ClientOtherBuffer, ClientEntry{Req: req, Index: s.ClientRequestHandler(ClientRequestInterpreter(req))})
+	}
 	s.Truncate()
 	// log.Printf("!!!!!!!client req: %+v\n local state: %+v\n", req, s)
 	return
@@ -642,20 +670,30 @@ func (s *Simulation) HandleRaftMessages(msg raftpb.Message) interface{} {
 // 	}
 // }
 
-func (s *Simulation) ConnectionCtx(id uint64, ctx Ctx) {
+func (s *Simulation) InitializeCtx(ctx Ctx) {
 	if ctx == nil {
 		return
 	}
-	s.searchConnectionCtx(id, ctx, true)
+	found := s.searchConnection(ctx, true, len(s.ClientROBuffer))
+	if found {
+		return
+	}
+	for i := 0; i < len(s.ClientROBuffer); i++ {
+		entry := s.ClientROBuffer[i]
+		s.ClientOtherBuffer[i] = ClientEntry{Req: entry.Req, Index: entry.Index, Ctxs: append(entry.Ctxs, ctx)}
+	}
 }
 
 func (s *Simulation) ConnectionAlive(id uint64, ctx Ctx) {
 	if ctx == nil {
 		return
 	}
-	found := s.searchConnectionCtx(id, ctx, false)
+	found := s.searchConnection(ctx, false, 0)
 	if found {
-		s.Alive[inSlice(s.peers, id)] = true
+		alive_peers := s.Connections[ctx].ids
+		if inSlice(alive_peers, id) == -1 {
+			s.Connections[ctx] = Connection{ref: 0, ids: append(alive_peers, id)}
+		}
 	}
 }
 
@@ -736,7 +774,7 @@ func (s *Simulation) ClientReplyChecker(resp Resp) bool {
 		if command.CommandIndex == TRUNCATED {
 			return true
 		}
-		return s.QuorumActive() && s.searchGet(resp)
+		return s.QuorumActive(resp.ctxs) && s.searchGet(resp)
 	case NormalResp:
 		index := resp.Index
 		return s.CommitIndex >= index
@@ -770,15 +808,18 @@ func (s *Simulation) searchGet(r Resp) bool {
 	return bytes.Equal(cd.Command.Value, r.Value)
 }
 
-func (s *Simulation) QuorumActive() bool {
-	s.Alive[inSlice(s.peers, s.me)] = true
-	nums := 0
-	for i := 0; i < len(s.peers); i++ {
-		if s.Alive[i] {
-			nums++
+func (s *Simulation) QuorumActive(ctxs []Ctx) bool {
+	connected_peers := []uint64{}
+	for i := 0; i < len(ctxs); i++ {
+		ctx := ctxs[i]
+		connection := s.Connections[ctx]
+		for _, id := range connection.ids {
+			if inSlice(connected_peers, id) == -1 {
+				connected_peers = append(connected_peers, id)
+			}
 		}
 	}
-	return nums > len(s.peers)/2
+	return len(connected_peers) > len(s.peers)/2
 }
 
 //Handler:
@@ -786,7 +827,7 @@ func (s *Simulation) ClientRequestHandler(args Op) uint64 {
 	// log.Printf("!!!!!!!!client req: %+v\n", args)
 	if s.State == Leader {
 		if args.Type == EntryKVRO {
-			s.clearConnection()
+			// s.clearConnection()
 			// for i := 0; i < len(s.peers); i++ {
 			// 	s.Alive[i] = false
 			// }
@@ -894,6 +935,7 @@ func (s *Simulation) Truncate() {
 		log.Fatal("The commit index is larger than the end of the log!\n")
 	}
 	s.Log = s.Log[local_index:]
+	s.ConnectionGC()
 }
 
 func (s *Simulation) DropStaleResponse(mterm uint64) bool {
@@ -974,37 +1016,52 @@ func (s *Simulation) updateCommitIndex() {
 // 	return false
 // }
 
-func (s *Simulation) searchInClientBuffer(e interface{}) (bool, uint64) {
-	length := len(s.ClientBuffer)
-	for i := 0; i < length; i++ {
-		if reflect.DeepEqual(s.ClientBuffer[i].Req, e) {
-			index := s.ClientBuffer[i].Index
-			s.ClientBuffer = append(s.ClientBuffer[:i], s.ClientBuffer[i+1:]...)
-			return true, index
+func (s *Simulation) searchInClientBuffer(e interface{}, t EntryType) (bool, ClientEntry) {
+	if t == EntryKVRO {
+		length := len(s.ClientROBuffer)
+		for i := 0; i < length; i++ {
+			if reflect.DeepEqual(s.ClientROBuffer[i].Req, e) {
+				entry := s.ClientROBuffer[i]
+				s.ClientROBuffer = append(s.ClientROBuffer[:i], s.ClientROBuffer[i+1:]...)
+				return true, entry
+			}
+		}
+	} else {
+		length := len(s.ClientOtherBuffer)
+		for i := 0; i < length; i++ {
+			if reflect.DeepEqual(s.ClientOtherBuffer[i].Req, e) {
+				entry := s.ClientOtherBuffer[i]
+				s.ClientOtherBuffer = append(s.ClientOtherBuffer[:i], s.ClientOtherBuffer[i+1:]...)
+				return true, entry
+			}
 		}
 	}
-	return false, 0
+	return false, ClientEntry{}
 }
 
-func (s *Simulation) searchConnectionCtx(id uint64, ctx Ctx, add bool) bool {
-	connection := s.CheckAliveCtx[id]
-	for i := 0; i < len(connection); i++ {
-		c := connection[i]
-		if reflect.DeepEqual(c, ctx) {
-			return true
-		}
+func (s *Simulation) searchConnection(ctx Ctx, add bool, ref int) bool {
+	_, exists := s.Connections[ctx]
+	if exists {
+		return true
 	}
 	if add {
-		s.CheckAliveCtx[id] = append(connection, ctx)
+		s.Connections[ctx] = Connection{ref: ref}
 	}
 	return false
 }
 
-func (s *Simulation) clearConnection() {
-	total := len(s.peers)
-	for i := 0; i < total; i++ {
-		s.Alive[i] = false
-		s.CheckAliveCtx[s.peers[i]] = make([]Ctx, 0)
+func (s *Simulation) ConnectionGC() {
+	if len(s.Connections) < 100 {
+		return
+	}
+
+	for ctx, connection := range s.Connections {
+		if connection.ref == 0 {
+			delete(s.Connections, ctx)
+		}
+		if connection.ref < 0 {
+			log.Fatalf("connection ref < 0! ERROR! ctx: %+v\n", ctx)
+		}
 	}
 }
 
@@ -1059,6 +1116,9 @@ func OpEqual(op1 Op, op2 Op) bool {
 }
 
 func inSlice(s []uint64, e uint64) int {
+	if s == nil {
+		return -1
+	}
 	length := len(s)
 	for i := 0; i < length; i++ {
 		if s[i] == e {
@@ -1066,6 +1126,6 @@ func inSlice(s []uint64, e uint64) int {
 		}
 	}
 	// debug.PrintStack()
-	log.Fatalf("value %d doesn't exist in the array %+v\n", e, s)
+	// log.Fatalf("value %d doesn't exist in the array %+v\n", e, s)
 	return -1
 }
