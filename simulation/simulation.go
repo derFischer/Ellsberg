@@ -576,6 +576,7 @@ func (s *Simulation) CheckRaftMessage(msg raftpb.Message, req interface{}) {
 }
 
 func (s *Simulation) CheckClientReplyMessage(reply interface{}, req interface{}) {
+	log.Printf("!!!!!!!!!!!!!!!check the reply %+v\n, current state: %+v\n", reply, s)
 	find := false
 	entry := ClientEntry{}
 	switch req.(type) {
