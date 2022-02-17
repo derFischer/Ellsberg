@@ -700,9 +700,9 @@ func (s *Simulation) ConnectionAlive(id uint64, ctx Ctx) {
 	}
 	found := s.searchConnection(ctx, false, 0)
 	if found {
-		alive_peers := s.Connections[ctx].ids
-		if inSlice(alive_peers, id) == -1 {
-			s.Connections[ctx] = Connection{ref: 0, ids: append(alive_peers, id)}
+		connection := s.Connections[ctx]
+		if inSlice(connection.ids, id) == -1 {
+			s.Connections[ctx] = Connection{ref: connection.ref, ids: append(connection.ids, id)}
 		}
 	}
 }
