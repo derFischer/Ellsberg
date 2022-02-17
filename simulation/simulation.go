@@ -498,7 +498,7 @@ func ClientResponseInterpreter(ce ClientEntry, resp interface{}) Resp {
 
 func CtxInterpreter(ctx []byte) [8]byte {
 	var a [8]byte
-	copy(a[:7], ctx)
+	copy(a[:8], ctx)
 	return a
 }
 
