@@ -612,6 +612,7 @@ func (s *Simulation) HandleClientRequest(req interface{}) {
 		s.ClientOtherBuffer = append(s.ClientOtherBuffer, ClientEntry{Req: req, Index: s.ClientRequestHandler(ClientRequestInterpreter(req))})
 	}
 	s.Truncate()
+	log.Printf("!!!!!!!!!!!!!handle client request %+v\n, state: %+v\n", req, s)
 	// log.Printf("!!!!!!!client req: %+v\n local state: %+v\n", req, s)
 	return
 }
