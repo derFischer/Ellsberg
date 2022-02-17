@@ -496,6 +496,12 @@ func ClientResponseInterpreter(ce ClientEntry, resp interface{}) Resp {
 	}
 }
 
+func CtxInterpreter(ctx []byte) [8]byte {
+	var a [8]byte
+	copy(a[:7], ctx)
+	return a
+}
+
 //func GetReplyInterpreter(args *Common.GetReply) GetReply {
 //	return GetReply{Value: args.Value, Success: args.Err == Common.OK}
 //}
@@ -531,9 +537,11 @@ func (s *Simulation) MsgInterpreter(msg raftpb.Message) (interface{}, uint64, ui
 	case raftpb.MsgVoteResp:
 		return RequestVoteReply{From: msg.From, To: msg.To, mterm: msg.Term, mvoteGranted: !msg.Reject}, msg.From, msg.To, nil
 	case raftpb.MsgHeartbeat:
-		return AppendEntriesArgs{From: msg.From, To: msg.To, mterm: msg.Term, mprevLogIndex: s.getLastCommandIndex(), mprevLogTerm: s.getLastCommandTerm(), mentries: []Command{}, mcommitIndex: msg.Commit, ctx: msg.Context}, msg.From, msg.To, msg.Context
+		ctx := CtxInterpreter(msg.Context)
+		return AppendEntriesArgs{From: msg.From, To: msg.To, mterm: msg.Term, mprevLogIndex: s.getLastCommandIndex(), mprevLogTerm: s.getLastCommandTerm(), mentries: []Command{}, mcommitIndex: msg.Commit, ctx: ctx}, msg.From, msg.To, ctx
 	case raftpb.MsgHeartbeatResp:
-		return AppendEntriesReply{From: msg.From, To: msg.To, mterm: msg.Term, msuccess: !msg.Reject, mmatchIndex: HEARTBEAT, ctx: msg.Context}, msg.From, msg.To, msg.Context
+		ctx := CtxInterpreter(msg.Context)
+		return AppendEntriesReply{From: msg.From, To: msg.To, mterm: msg.Term, msuccess: !msg.Reject, mmatchIndex: HEARTBEAT, ctx: ctx}, msg.From, msg.To, ctx
 	}
 	return nil, 0, 0, nil
 }
