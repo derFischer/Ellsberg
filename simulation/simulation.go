@@ -594,6 +594,7 @@ func (s *Simulation) HandleRaftMessages(msg raftpb.Message) interface{} {
 	case raftpb.MsgReadIndex:
 		s.ReadIndexRequestHandler(msg_itp.(ReadIndexArgs))
 	case raftpb.MsgReadIndexResp:
+		s.ReadIndexReplyHandler(msg_itp.(ReadIndexReply))
 	}
 	return nil
 }
