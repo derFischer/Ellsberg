@@ -2,7 +2,6 @@ package simulation
 
 import (
 	"bytes"
-	"fmt"
 	"log"
 	"math"
 	"reflect"
@@ -17,18 +16,6 @@ import (
 // import "bytes"
 // import "labgob"
 
-//
-// as each Raft peer becomes aware that successive log entries are
-// committed, the peer should send an ApplyMsg to the service (or
-// tester) on the same server, via the applyCh passed to Make(). set
-// CommandValid to true to indicate that the ApplyMsg contains a newly
-// committed log entry.
-//
-// in Lab 3 you'll want to send other kinds of messages (e.g.,
-// snapshots) on the applyCh; at that point you can add fields to
-// ApplyMsg, but set CommandValid to false for these other uses.
-//
-
 type StateType int32
 
 const (
@@ -38,15 +25,15 @@ const (
 )
 
 const (
-	TRUNCATED = math.MaxInt64
-	NONEXIST  = math.MaxInt64 - 1
+	TRUNCATED = math.MaxUint64
+	NONEXIST  = math.MaxUint64 - 1
 )
 
 const (
-	HEARTBEAT = math.MaxInt64
+	HEARTBEAT = math.MaxUint64
 )
 
-const NOONE = math.MaxInt64 - 1
+const NOONE = math.MaxUint64 - 1
 
 type EntryType int32
 
@@ -71,6 +58,11 @@ type Ctx interface{}
 type Connection struct {
 	ref int
 	ids []uint64
+}
+
+type RIndex struct {
+	ref   int
+	index uint64
 }
 
 type RequestVoteArgs struct {
@@ -108,6 +100,20 @@ type AppendEntriesReply struct {
 	msuccess    bool
 	mmatchIndex uint64
 	ctx         Ctx
+}
+
+type ReadIndexArgs struct {
+	From uint64
+	To   uint64
+	rctx []byte
+}
+
+type ReadIndexReply struct {
+	From  uint64
+	To    uint64
+	mterm uint64
+	rctx  []byte
+	index uint64
 }
 
 type Command struct {
@@ -161,10 +167,11 @@ type Simulation struct {
 	mmatchIndex []uint64
 	peers       []uint64
 	Connections map[Ctx]Connection
-	// CheckAliveCtx     map[uint64][]Ctx
-	MsgCh chan simulationpb.Msg
+	MsgCh       chan simulationpb.Msg
 
-	// RaftBuffer   []interface{}
+	// PendingReadIndex []ReadIndex
+	ReadIndexCtx map[Ctx]RIndex
+
 	ClientROBuffer    []ClientEntry
 	ClientOtherBuffer []ClientEntry
 }
@@ -186,7 +193,6 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	log := make([]Command, 4)
 	log[0] = Command{CommandIndex: 0}
 	log[3] = Command{CommandIndex: 3, CommandTerm: 1}
-	// log[8] = Command{CommandIndex: 8}
 
 	sl := new(Simulation)
 	sl.me = id
@@ -195,14 +201,12 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	sl.VotedFor = NOONE
 	sl.Votes = votes
 	sl.Connections = alive
-	// sl.CheckAliveCtx = checkAliveCtx
 	sl.Log = log
 	sl.CommitIndex = 0
 	sl.mmatchIndex = matchIndex
 	sl.peers = peers
 	sl.MsgCh = make(chan simulationpb.Msg)
 
-	// sl.RaftBuffer = make([]interface{}, 0)
 	sl.ClientROBuffer = make([]ClientEntry, 0)
 	sl.ClientOtherBuffer = make([]ClientEntry, 0)
 
@@ -212,14 +216,12 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 			case msg := <-sl.MsgCh:
 				if msg.Send {
 					if msg.Type == simulationpb.ClientMsg {
-						fmt.Printf("!!!!!!!!!!!simulation tries to check client request: %+v\n", msg)
 						sl.CheckClientReplyMessage(msg.Msg, msg.Req)
 					} else {
 						sl.CheckRaftMessage(msg.Msg.(raftpb.Message), msg.Req)
 					}
 				} else {
 					if msg.Type == simulationpb.ClientMsg {
-						fmt.Printf("!!!!!!!!!!!simulation starts to handle client request: %+v\n", msg)
 						sl.HandleClientRequest(msg.Msg)
 					} else {
 						sl.HandleRaftMessages(msg.Msg.(raftpb.Message))
@@ -230,36 +232,6 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	}()
 	return sl
 }
-
-// func NewSL(id uint64, peers []uint64) *Simulation {
-// 	total := len(peers)
-// 	votes := make([]bool, total)
-// 	alive := make([]bool, total)
-// 	for i := 0; i < total; i++ {
-// 		votes[i] = false
-// 		alive[i] = false
-// 	}
-// 	matchIndex := make([]uint64, total)
-// 	for i := 0; i < total; i++ {
-// 		matchIndex[i] = 0
-// 	}
-// 	//hack the initial state
-// 	log := make([]Command, 9)
-// 	log[0] = Command{CommandIndex: 0}
-// 	log[8] = Command{CommandIndex: 8}
-// 	return &Simulation{
-// 		me:          id,
-// 		State:       Follower,
-// 		CurrentTerm: 0,
-// 		VotedFor:    NOONE,
-// 		Votes:       votes,
-// 		Alive:       alive,
-// 		Log:         log,
-// 		CommitIndex: 0,
-// 		mmatchIndex: matchIndex,
-// 		peers:       peers,
-// 	}
-// }
 
 //helper function
 func Equal(arg1 uint64, arg2 uint64) bool {
@@ -274,7 +246,6 @@ func Equal(arg1 uint64, arg2 uint64) bool {
 }
 
 func SliceEqual(arg1 []Command, arg2 []Command) bool {
-	////////fmt.Printf("print commands: %v, %v\n", arg1, arg2)
 	if len(arg1) != len(arg2) {
 		return false
 	}
@@ -397,28 +368,12 @@ func (s *Simulation) logMatch(l []Command) bool {
 			continue
 		}
 		if cmd.Command.Data != nil {
-			// log.Printf("!!!!!!!!!!!!!!!!!!!!entry content different: local: %+v\n, compared: %+v\n", local_cmd, cmd)
 			return false
 		}
 		s.InsertEmtpy(cmd)
 	}
 	return true
 }
-
-//func (s *Simulation) Get(key string, commandIndex int) (bool, string) {
-//	found := false
-//	value := ""
-//	for _, command := range s.Log {
-//		if command.CommandIndex > commandIndex {
-//			break
-//		}
-//		if command.Command.Key == key && command.Command.Op == "PUT" {
-//			found = true
-//			value = command.Command.Value
-//		}
-//	}
-//	return found, value
-//}
 
 func (s *Simulation) appendEntries(entries []Command) {
 	for _, command := range entries {
@@ -435,9 +390,7 @@ func (s *Simulation) appendEntries(entries []Command) {
 }
 
 //Interpreter: interpret the message to simulation
-
 func CommandInterpreter(command raftpb.Entry) Command {
-	//var req *pb.InternalRaftRequest
 	if command.Data == nil {
 		return Command{CommandIndex: command.Index, CommandTerm: command.Term, Command: Op{Type: EntryNormal, Data: command.Data}}
 	}
@@ -445,12 +398,10 @@ func CommandInterpreter(command raftpb.Entry) Command {
 	req := new(pb.InternalRaftRequest)
 	err := req.Unmarshal(command.Data)
 	if err != nil {
-		//log.Fatalf("command unmarshal failed: %+v\n", command)
 		return Command{CommandIndex: command.Index, CommandTerm: command.Term, Command: Op{Type: EntryNormal, Data: command.Data}}
 	}
 	if req.Put != nil {
 		data, _ := (req.Put).Marshal()
-		// log.Printf("!!!!!!!!!!!!!!!!!the request is: %+v\n, the bytes are: %+v\n", req.Put, data)
 		return Command{CommandIndex: command.Index, CommandTerm: command.Term, Command: Op{Type: EntryKVPut, Key: req.Put.Key, Value: req.Put.Value, Data: data}}
 	}
 	return Command{CommandIndex: command.Index, CommandTerm: command.Term, Command: Op{Type: EntryNormal, Data: command.Data}}
@@ -464,10 +415,6 @@ func CommandsInterpreter(commands []raftpb.Entry) []Command {
 	return result
 }
 
-//func GetRequestInterpreter(args *Common.GetArgs) Op {
-//	return Op{Op: "GET", Key: args.Key, ClientId: args.ClientId, ReqId: args.ReqId}
-//}
-//
 func PutRequestInterpreter(req *pb.PutRequest) Op {
 	data, err := req.Marshal()
 	if err != nil {
@@ -502,30 +449,6 @@ func CtxInterpreter(ctx []byte) [8]byte {
 	return a
 }
 
-//func GetReplyInterpreter(args *Common.GetReply) GetReply {
-//	return GetReply{Value: args.Value, Success: args.Err == Common.OK}
-//}
-//
-//func PutReplyInterpreter(args *Common.PutAppendReply) PutAppendReply {
-//	return PutAppendReply{Success: args.Err == Common.OK}
-//}
-
-//func RequestVoteRequestInterPreter(args *Common.RequestVoteArgs) RequestVoteArgs {
-//	return RequestVoteArgs{From: args.From, mterm: args.Term, msource: args.CandidateId, mlastLogIndex: args.LastLogIndex, mlastLogTerm: args.LastLogTerm}
-//}
-//
-//func AppendEntryRequestInterPreter(args *Common.AppendEntriesArgs) AppendEntriesArgs {
-//	return AppendEntriesArgs{From: args.From, mterm: args.Term, msource: args.LeaderId, mprevLogIndex: args.PrevLogIndex, mprevLogTerm: args.PrevLogTerm, mentries: CommandsInterpreter(args.Entries), mcommitIndex: args.LeaderCommit}
-//}
-//
-//func RequestVoteReplyInterpreter(reply *Common.RequestVoteReply) RequestVoteReply {
-//	return RequestVoteReply{From: reply.From, mterm: reply.Term, mvoteGranted: reply.VoteGranted}
-//}
-//
-//func AppendEntryReplyInterpreter(reply *Common.AppendEntriesReply) AppendEntriesReply {
-//	return AppendEntriesReply{From: reply.From, mterm: reply.Term, msuccess: reply.Success}
-//}
-
 func (s *Simulation) MsgInterpreter(msg raftpb.Message) (interface{}, uint64, uint64, Ctx) {
 	switch msg.Type {
 	case raftpb.MsgApp:
@@ -542,6 +465,10 @@ func (s *Simulation) MsgInterpreter(msg raftpb.Message) (interface{}, uint64, ui
 	case raftpb.MsgHeartbeatResp:
 		ctx := CtxInterpreter(msg.Context)
 		return AppendEntriesReply{From: msg.From, To: msg.To, mterm: msg.Term, msuccess: !msg.Reject, mmatchIndex: HEARTBEAT, ctx: ctx}, msg.From, msg.To, ctx
+	case raftpb.MsgReadIndex:
+		return ReadIndexArgs{From: msg.From, To: msg.To, rctx: msg.Entries[0].Data}, msg.From, msg.To, nil
+	case raftpb.MsgReadIndexResp:
+		return ReadIndexReply{From: msg.From, To: msg.To, mterm: msg.Term, rctx: msg.Entries[0].Data, index: msg.Index}, msg.From, msg.To, nil
 	}
 	return nil, 0, 0, nil
 }
@@ -559,16 +486,18 @@ func (s *Simulation) CheckRaftMessage(msg raftpb.Message, req interface{}) {
 		valid = s.AppendEntryRequestChecker(msg_itp.(AppendEntriesArgs))
 	case raftpb.MsgHeartbeat:
 		valid = s.AppendEntryRequestChecker(msg_itp.(AppendEntriesArgs))
+	case raftpb.MsgReadIndex:
+		args := msg_itp.(ReadIndexArgs)
+		valid = s.ReadIndexRequestChecker(args)
+		s.InitializeRctx(args.rctx)
 	case raftpb.MsgVoteResp:
-		// r := s.HandleRaftReqMessages(req.(raftpb.Message)).(RequestVoteReply)
 		valid = s.RequestVoteReplyChecker(msg_itp.(RequestVoteReply), s.HandleRaftReqMessages(req.(raftpb.Message)).(RequestVoteReply))
-		// if !valid {
-		// 	log.Fatalf("check request message error! server: %d, args: %+v\n local state: %+v\n, reply_impl: %+v\n, reply_sl: %+v\n", s.me, req, s, msg, r)
-		// }
 	case raftpb.MsgAppResp:
 		valid = s.AppendEntryReplyChecker(msg_itp.(AppendEntriesReply), s.HandleRaftReqMessages(req.(raftpb.Message)).(AppendEntriesReply))
 	case raftpb.MsgHeartbeatResp:
 		valid = s.AppendEntryReplyChecker(msg_itp.(AppendEntriesReply), s.HandleRaftReqMessages(req.(raftpb.Message)).(AppendEntriesReply))
+	case raftpb.MsgReadIndexResp:
+		valid = s.ReadIndexReplyChecker(msg_itp.(ReadIndexReply))
 	}
 	if !valid {
 		log.Fatalf("check request message error! server: %d, msg: %+v\n req: %+v\n local state: %+v\n", s.me, msg, req, s)
@@ -576,13 +505,11 @@ func (s *Simulation) CheckRaftMessage(msg raftpb.Message, req interface{}) {
 }
 
 func (s *Simulation) CheckClientReplyMessage(reply interface{}, req interface{}) {
-	log.Printf("!!!!!!!!!!!!!!!check the reply %+v\n, current state: %+v\n", reply, s)
 	find := false
 	entry := ClientEntry{}
 	switch req.(type) {
 	case *pb.RangeRequest:
 		find, entry = s.searchInClientBuffer(req, EntryKVRO)
-		// return Resp{Type: ReadResp, Index: ce.Index, Key: resp.(*pb.RangeResponse).Kvs[0].Key, Value: resp.(*pb.RangeResponse).Kvs[0].Value, ctxs: ce.Ctxs}
 	default:
 		find, entry = s.searchInClientBuffer(req, EntryNormal)
 	}
@@ -609,11 +536,12 @@ func (s *Simulation) HandleClientRequest(req interface{}) {
 	case *pb.RangeRequest:
 		s.ClientROBuffer = append(s.ClientROBuffer, ClientEntry{Req: req, Index: s.ClientRequestHandler(ClientRequestInterpreter(req))})
 	default:
-		s.ClientOtherBuffer = append(s.ClientOtherBuffer, ClientEntry{Req: req, Index: s.ClientRequestHandler(ClientRequestInterpreter(req))})
+		//only the leader can process other types of client request
+		if s.State == Leader {
+			s.ClientOtherBuffer = append(s.ClientOtherBuffer, ClientEntry{Req: req, Index: s.ClientRequestHandler(ClientRequestInterpreter(req))})
+		}
 	}
 	s.Truncate()
-	log.Printf("!!!!!!!!!!!!!handle client request %+v\n, state: %+v\n", req, s)
-	// log.Printf("!!!!!!!client req: %+v\n local state: %+v\n", req, s)
 	return
 }
 
@@ -628,15 +556,11 @@ func (s *Simulation) HandleRaftReqMessages(msg raftpb.Message) interface{} {
 		s.ClientRequestHandler(Op{Type: EntryNormal, Data: msg.Entries[0].Data})
 	case raftpb.MsgVote:
 		r := s.RequestVoteRequestHandler(msg_itp.(RequestVoteArgs))
-		// log.Printf("receives MsgVote: %+v, after interpreter: %+v, reply: %+v\n", msg, s.MsgInterpreter(msg).(RequestVoteArgs), r)
 		return r
-		// s.RaftBuffer = append(s.RaftBuffer, r)
 	case raftpb.MsgApp:
 		r := s.AppendEntryRequestHandler(msg_itp.(AppendEntriesArgs))
 		s.Truncate()
-		// log.Printf("receives MsgApp: %+v, after interpreter: %+v, reply: %+v\n", msg, s.MsgInterpreter(msg).(AppendEntriesArgs), s.AppendEntryRequestHandler(s.MsgInterpreter(msg).(AppendEntriesArgs)))
 		return r
-		// s.RaftBuffer = append(s.RaftBuffer, r)
 	case raftpb.MsgHeartbeat:
 		r := s.AppendEntryRequestHandler(msg_itp.(AppendEntriesArgs))
 		return r
@@ -654,31 +578,12 @@ func (s *Simulation) HandleRaftMessages(msg raftpb.Message) interface{} {
 		s.AppendEntryReplyHandler(msg_itp.(AppendEntriesReply))
 	case raftpb.MsgHeartbeatResp:
 		s.AppendEntryReplyHandler(msg_itp.(AppendEntriesReply))
+	case raftpb.MsgReadIndex:
+		s.ReadIndexRequestHandler(msg_itp.(ReadIndexArgs))
+	case raftpb.MsgReadIndexResp:
 	}
 	return nil
 }
-
-// func (s *Simulation) HandleRaftRequestMessage(req raftpb.Message) {
-// 	switch req.Type {
-// 	case raftpb.MsgVote:
-// 		s.RequestVoteRequestHandler(s.MsgInterpreter(req).(RequestVoteArgs))
-// 	case raftpb.MsgApp:
-// 		s.AppendEntryRequestHandler(s.MsgInterpreter(req).(AppendEntriesArgs))
-// 	case raftpb.MsgHeartbeat:
-// 		s.AppendEntryRequestHandler(s.MsgInterpreter(req).(AppendEntriesArgs))
-// 	}
-// }
-
-// func (s *Simulation) HandleRaftReplyMessage(reply raftpb.Message) {
-// 	switch reply.Type {
-// 	case raftpb.MsgVoteResp:
-// 		s.RequestVoteReplyHandler(s.MsgInterpreter(reply).(RequestVoteReply))
-// 	case raftpb.MsgAppResp:
-// 		s.AppendEntryReplyHandler(s.MsgInterpreter(reply).(AppendEntriesReply))
-// 	case raftpb.MsgHeartbeatResp:
-// 		s.AppendEntryReplyHandler(s.MsgInterpreter(reply).(AppendEntriesReply))
-// 	}
-// }
 
 func (s *Simulation) InitializeCtx(ctx Ctx) {
 	if ctx == nil {
@@ -694,6 +599,17 @@ func (s *Simulation) InitializeCtx(ctx Ctx) {
 	}
 }
 
+func (s *Simulation) InitializeRctx(rctx Ctx) {
+	found := s.searchRctx(rctx, true, len(s.ClientROBuffer))
+	if found {
+		return
+	}
+	for i := 0; i < len(s.ClientROBuffer); i++ {
+		ri := s.ClientROBuffer[i]
+		s.ClientROBuffer[i] = ClientEntry{Req: ri.Req, Index: ri.Index, Ctxs: append(ri.Ctxs, rctx)}
+	}
+}
+
 func (s *Simulation) ConnectionAlive(id uint64, ctx Ctx) {
 	if ctx == nil {
 		return
@@ -703,6 +619,16 @@ func (s *Simulation) ConnectionAlive(id uint64, ctx Ctx) {
 		connection := s.Connections[ctx]
 		if inSlice(connection.ids, id) == -1 {
 			s.Connections[ctx] = Connection{ref: connection.ref, ids: append(connection.ids, id)}
+		}
+	}
+}
+
+func (s *Simulation) RctxIndex(rctx Ctx, index uint64) {
+	found := s.searchRctx(rctx, false, 0)
+	if found {
+		ri := s.ReadIndexCtx[rctx]
+		if ri.index > index {
+			s.ReadIndexCtx[rctx] = RIndex{ref: ri.ref, index: index}
 		}
 	}
 }
@@ -740,10 +666,7 @@ func (s *Simulation) AppendEntryRequestChecker(args AppendEntriesArgs) bool {
 	}
 
 	state_check := (s.State == Leader) && (args.mterm == s.CurrentTerm) && (args.From == s.me) && (args.mcommitIndex <= s.CommitIndex)
-	// params_checker := Equal(args.mprevLogTerm, s.getCommandTerm(args.mprevLogIndex)) && SliceEqual(args.mentries, s.getLogSlice(args.mprevLogIndex, uint64(len(args.mentries))))
 	params_checker := Equal(args.mprevLogTerm, s.getCommandTerm(args.mprevLogIndex)) && s.logMatch(args.mentries)
-	//////fmt.Printf("request args: %+v, local state: %+v\n", args, s)
-	//////fmt.Printf("state_check: %+v, params_check: %+v\n", state_check, SliceEqual(args.mentries, s.getLogSlice(args.mprevLogIndex, len(args.mentries))))
 	return args.From == s.me && state_check && params_checker
 }
 
@@ -766,25 +689,31 @@ func (s *Simulation) RequestVoteReplyChecker(r_exec RequestVoteReply, r_sl Reque
 
 func (s *Simulation) AppendEntryReplyChecker(r_exec AppendEntriesReply, r_sl AppendEntriesReply) bool {
 	// return s.searchInRaftBuffer(r_exec)
-	return (r_exec.From == r_sl.From) && (r_exec.mterm == r_sl.mterm) && (r_exec.msuccess == r_sl.msuccess) && ((r_exec.mmatchIndex == r_sl.mmatchIndex) || r_exec.mmatchIndex == uint64(HEARTBEAT))
+	return (r_exec.From == r_sl.From) && (r_exec.To == r_sl.To) && (r_exec.mterm == r_sl.mterm) && (r_exec.msuccess == r_sl.msuccess) && ((r_exec.mmatchIndex == r_sl.mmatchIndex) || r_exec.mmatchIndex == uint64(HEARTBEAT))
 }
 
-//func (s *Simulation) GetReplyChecker(args Op, reply GetReply) bool {
-//	found, command := s.entryInLog(args)
-//	key_in_log, value := s.Get(args.Key, command.CommandIndex)
-//	commit := s.CommitIndex >= command.CommandIndex
-//	return s.inConfig() && (!reply.Success || !found || !key_in_log || value == reply.Value && commit)
-//}
-//
+func (s *Simulation) ReadIndexRequestChecker(args ReadIndexArgs) bool {
+	return args.From == s.me
+}
+
+func (s *Simulation) ReadIndexReplyChecker(r_exec ReadIndexReply) bool {
+	find, entry := s.searchInClientBuffer(r_exec.rctx, EntryKVRO)
+	if !find {
+		log.Fatalf("cannot find the read only request in the buffer: %+v\n", r_exec)
+	}
+	return s.State == Leader && s.QuorumActive(entry.Ctxs) && r_exec.From == s.me && r_exec.mterm == s.CurrentTerm && reflect.DeepEqual(r_exec.rctx, entry.Req) && r_exec.index >= entry.Index
+}
 
 func (s *Simulation) ClientReplyChecker(resp Resp) bool {
 	switch resp.Type {
 	case ReadResp:
-		command := s.getCommand(resp.Index)
-		if command.CommandIndex == TRUNCATED {
-			return true
+		if s.State == Leader {
+			return s.QuorumActive(resp.ctxs) && s.searchGet(resp)
+		} else {
+			index := s.ValidIndex(resp.ctxs)
+			return s.CommitIndex >= index && s.searchGet(Resp{Type: resp.Type, Index: index, Key: resp.Key, Value: resp.Value})
 		}
-		return s.QuorumActive(resp.ctxs) && s.searchGet(resp)
+
 	case NormalResp:
 		index := resp.Index
 		return s.CommitIndex >= index
@@ -794,6 +723,10 @@ func (s *Simulation) ClientReplyChecker(resp Resp) bool {
 }
 
 func (s *Simulation) searchGet(r Resp) bool {
+	if r.Index < s.getFirstCommandIndex() {
+		return true
+	}
+
 	first_valid_commit := -1
 	for i := s.getFirstCommandIndex(); i <= s.CommitIndex; i++ {
 		command := s.getCommand(i)
@@ -832,15 +765,22 @@ func (s *Simulation) QuorumActive(ctxs []Ctx) bool {
 	return (len(connected_peers) + 1) > len(s.peers)/2
 }
 
+func (s *Simulation) ValidIndex(rctxs []Ctx) uint64 {
+	index := uint64(math.MaxUint64)
+	for i := 0; i < len(rctxs); i++ {
+		rctx := rctxs[i]
+		ri := s.ReadIndexCtx[rctx]
+		if ri.index < index {
+			index = ri.index
+		}
+	}
+	return index
+}
+
 //Handler:
 func (s *Simulation) ClientRequestHandler(args Op) uint64 {
-	// log.Printf("!!!!!!!!client req: %+v\n", args)
 	if s.State == Leader {
 		if args.Type == EntryKVRO {
-			// s.clearConnection()
-			// for i := 0; i < len(s.peers); i++ {
-			// 	s.Alive[i] = false
-			// }
 			return s.CommitIndex
 		} else {
 			index := s.getLastCommandIndex() + 1
@@ -850,7 +790,7 @@ func (s *Simulation) ClientRequestHandler(args Op) uint64 {
 			return index
 		}
 	}
-	return math.MaxInt64
+	return math.MaxUint64
 }
 
 func (s *Simulation) RequestVoteRequestHandler(args RequestVoteArgs) RequestVoteReply {
@@ -868,7 +808,6 @@ func (s *Simulation) RequestVoteRequestHandler(args RequestVoteArgs) RequestVote
 	}
 	r.mterm = s.CurrentTerm
 	r.mvoteGranted = grant
-	// log.Printf("server %d receives vote request, args: %+v\n, local: %+v\n, reply: %+v\n", s.me, args, s, r)
 	return r
 }
 
@@ -881,11 +820,6 @@ func (s *Simulation) AppendEntryRequestHandler(args AppendEntriesArgs) AppendEnt
 	}
 	s.UpdateTerm(args.mterm)
 	logOK := (args.mprevLogIndex == 0) || (args.mprevLogIndex > 0 && args.mprevLogIndex <= s.getLastCommandIndex() && Equal(args.mprevLogTerm, s.getCommandTerm(args.mprevLogIndex)))
-
-	//hack the initial state:
-	// if args.mprevLogIndex <= 8 {
-	// 	logOK = true
-	// }
 
 	if args.mterm == s.CurrentTerm && s.State == Follower && !logOK {
 		r.mterm = s.CurrentTerm
@@ -905,6 +839,16 @@ func (s *Simulation) AppendEntryRequestHandler(args AppendEntriesArgs) AppendEnt
 	return r
 }
 
+func (s *Simulation) ReadIndexRequestHandler(args ReadIndexArgs) {
+	if args.From == 0 {
+		// we have already handled the RO request sent to the leader
+		return
+	}
+	if s.State == Leader {
+		s.ClientROBuffer = append(s.ClientROBuffer, ClientEntry{Req: args.rctx, Index: s.ClientRequestHandler(Op{Type: EntryKVRO, Key: nil})})
+	}
+}
+
 func (s *Simulation) RequestVoteReplyHandler(reply RequestVoteReply) {
 	if s.DropStaleResponse(reply.mterm) {
 		return
@@ -918,7 +862,6 @@ func (s *Simulation) RequestVoteReplyHandler(reply RequestVoteReply) {
 }
 
 func (s *Simulation) AppendEntryReplyHandler(reply AppendEntriesReply) {
-	////fmt.Printf("appendentry args, %+v, reply: %+v\n", args, reply)
 	if s.DropStaleResponse(reply.mterm) {
 		return
 	}
@@ -930,6 +873,14 @@ func (s *Simulation) AppendEntryReplyHandler(reply AppendEntriesReply) {
 		}
 	}
 	return
+}
+
+func (s *Simulation) ReadIndexReplyHandler(reply ReadIndexReply) {
+	if s.DropStaleResponse(reply.mterm) {
+		return
+	}
+	s.UpdateTerm(reply.mterm)
+	s.RctxIndex(reply.rctx, reply.index)
 }
 
 //other functions
@@ -1001,12 +952,10 @@ func (s *Simulation) Leader() {
 		s.mmatchIndex[i] = 0
 	}
 	s.mmatchIndex[inSlice(s.peers, s.me)] = s.getLastCommandIndex()
-	////fmt.Printf("server %d becomes leader, state: %+v\n", s.me, s)
 }
 
 func (s *Simulation) updateCommitIndex() {
 	majority := findMajority(s.mmatchIndex)
-	//log.Printf("server tries to update commit index, matchindex: %+v, majority: %d\n", s.mmatchIndex, majority)
 	if majority > s.CommitIndex {
 		command := s.getCommand(majority)
 		if command.CommandTerm == s.CurrentTerm {
@@ -1014,17 +963,6 @@ func (s *Simulation) updateCommitIndex() {
 		}
 	}
 }
-
-// func (s *Simulation) searchInRaftBuffer(e interface{}) bool {
-// 	length := len(s.RaftBuffer)
-// 	for i := 0; i < length; i++ {
-// 		if reflect.DeepEqual(s.RaftBuffer[i], e) {
-// 			s.RaftBuffer = append(s.RaftBuffer[:i], s.RaftBuffer[i+1:]...)
-// 			return true
-// 		}
-// 	}
-// 	return false
-// }
 
 func (s *Simulation) searchInClientBuffer(e interface{}, t EntryType) (bool, ClientEntry) {
 	if t == EntryKVRO {
@@ -1060,6 +998,17 @@ func (s *Simulation) searchConnection(ctx Ctx, add bool, ref int) bool {
 	return false
 }
 
+func (s *Simulation) searchRctx(rctx Ctx, add bool, ref int) bool {
+	_, exists := s.ReadIndexCtx[rctx]
+	if exists {
+		return true
+	}
+	if add {
+		s.ReadIndexCtx[rctx] = RIndex{ref: ref, index: math.MaxUint64}
+	}
+	return false
+}
+
 func (s *Simulation) ConnectionGC() {
 	if len(s.Connections) < 100 {
 		return
@@ -1071,6 +1020,21 @@ func (s *Simulation) ConnectionGC() {
 		}
 		if connection.ref < 0 {
 			log.Fatalf("connection ref < 0! ERROR! ctx: %+v\n", ctx)
+		}
+	}
+}
+
+func (s *Simulation) RctxGC() {
+	if len(s.ReadIndexCtx) < 100 {
+		return
+	}
+
+	for rctx, ri := range s.ReadIndexCtx {
+		if ri.ref == 0 {
+			delete(s.ReadIndexCtx, rctx)
+		}
+		if ri.ref < 0 {
+			log.Fatalf("rctx ref < 0! ERROR! rctx: %+v\n", rctx)
 		}
 	}
 }
@@ -1135,7 +1099,5 @@ func inSlice(s []uint64, e uint64) int {
 			return i
 		}
 	}
-	// debug.PrintStack()
-	// log.Fatalf("value %d doesn't exist in the array %+v\n", e, s)
 	return -1
 }
