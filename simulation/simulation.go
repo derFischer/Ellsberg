@@ -54,6 +54,7 @@ const (
 
 //raft msgs
 type Ctx interface{}
+type Rctx interface{}
 
 type Connection struct {
 	ref int
@@ -105,14 +106,14 @@ type AppendEntriesReply struct {
 type ReadIndexArgs struct {
 	From uint64
 	To   uint64
-	rctx []byte
+	rctx Rctx
 }
 
 type ReadIndexReply struct {
 	From  uint64
 	To    uint64
 	mterm uint64
-	rctx  []byte
+	rctx  Rctx
 	index uint64
 }
 
@@ -449,6 +450,12 @@ func CtxInterpreter(ctx []byte) [8]byte {
 	return a
 }
 
+func RctxInterpreter(rctx []byte) [8]byte {
+	var a [8]byte
+	copy(a[:8], rctx)
+	return a
+}
+
 func (s *Simulation) MsgInterpreter(msg raftpb.Message) (interface{}, uint64, uint64, Ctx) {
 	switch msg.Type {
 	case raftpb.MsgApp:
@@ -466,9 +473,9 @@ func (s *Simulation) MsgInterpreter(msg raftpb.Message) (interface{}, uint64, ui
 		ctx := CtxInterpreter(msg.Context)
 		return AppendEntriesReply{From: msg.From, To: msg.To, mterm: msg.Term, msuccess: !msg.Reject, mmatchIndex: HEARTBEAT, ctx: ctx}, msg.From, msg.To, ctx
 	case raftpb.MsgReadIndex:
-		return ReadIndexArgs{From: msg.From, To: msg.To, rctx: msg.Entries[0].Data}, msg.From, msg.To, nil
+		return ReadIndexArgs{From: msg.From, To: msg.To, rctx: RctxInterpreter(msg.Entries[0].Data)}, msg.From, msg.To, nil
 	case raftpb.MsgReadIndexResp:
-		return ReadIndexReply{From: msg.From, To: msg.To, mterm: msg.Term, rctx: msg.Entries[0].Data, index: msg.Index}, msg.From, msg.To, nil
+		return ReadIndexReply{From: msg.From, To: msg.To, mterm: msg.Term, rctx: RctxInterpreter(msg.Entries[0].Data), index: msg.Index}, msg.From, msg.To, nil
 	}
 	return nil, 0, 0, nil
 }
