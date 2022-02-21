@@ -529,9 +529,16 @@ func (s *Simulation) CheckClientReplyMessage(reply interface{}, req interface{})
 	}
 
 	//clear the ref
-	for _, ctx := range entry.Ctxs {
-		connection := s.Connections[ctx]
-		s.Connections[ctx] = Connection{ref: connection.ref - 1, ids: connection.ids}
+	if s.State == Leader {
+		for _, ctx := range entry.Ctxs {
+			connection := s.Connections[ctx]
+			s.Connections[ctx] = Connection{ref: connection.ref - 1, ids: connection.ids}
+		}
+	} else {
+		for _, rctx := range entry.Ctxs {
+			ri := s.ReadIndexCtx[rctx]
+			s.ReadIndexCtx[rctx] = RIndex{ref: ri.ref - 1, index: ri.index}
+		}
 	}
 }
 
@@ -891,18 +898,9 @@ func (s *Simulation) ReadIndexReplyHandler(reply ReadIndexReply) {
 
 //other functions
 func (s *Simulation) Truncate() {
-	if len(s.Log) <= 100 {
-		return
-	}
-	local_index := s.getCurrentIndex(s.CommitIndex)
-	if local_index == TRUNCATED {
-		log.Fatal("The last committed entry has been truncated, incorrect!\n")
-	}
-	if local_index == NONEXIST {
-		log.Fatal("The commit index is larger than the end of the log!\n")
-	}
-	s.Log = s.Log[local_index:]
+	s.LogGC()
 	s.ConnectionGC()
+	s.ReadIndexGC()
 }
 
 func (s *Simulation) DropStaleResponse(mterm uint64) bool {
@@ -1015,6 +1013,20 @@ func (s *Simulation) searchRctx(rctx Ctx, add bool, ref int) bool {
 	return false
 }
 
+func (s *Simulation) LogGC() {
+	if len(s.Log) <= 100 {
+		return
+	}
+	local_index := s.getCurrentIndex(s.CommitIndex)
+	if local_index == TRUNCATED {
+		log.Fatal("The last committed entry has been truncated, incorrect!\n")
+	}
+	if local_index == NONEXIST {
+		log.Fatal("The commit index is larger than the end of the log!\n")
+	}
+	s.Log = s.Log[local_index:]
+}
+
 func (s *Simulation) ConnectionGC() {
 	if len(s.Connections) < 100 {
 		return
@@ -1026,6 +1038,21 @@ func (s *Simulation) ConnectionGC() {
 		}
 		if connection.ref < 0 {
 			log.Fatalf("connection ref < 0! ERROR! ctx: %+v\n", ctx)
+		}
+	}
+}
+
+func (s *Simulation) ReadIndexGC() {
+	if len(s.ReadIndexCtx) < 100 {
+		return
+	}
+
+	for rctx, ri := range s.ReadIndexCtx {
+		if ri.ref == 0 {
+			delete(s.ReadIndexCtx, rctx)
+		}
+		if ri.ref < 0 {
+			log.Fatalf("readindex ref < 0! ERROR! rctx: %+v\n, rctx", rctx)
 		}
 	}
 }
