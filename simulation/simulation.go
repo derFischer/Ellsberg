@@ -171,7 +171,7 @@ type Simulation struct {
 	MsgCh       chan simulationpb.Msg
 
 	// PendingReadIndex []ReadIndex
-	ReadIndexCtx map[Ctx]RIndex
+	ReadIndexCtx map[Rctx]RIndex
 
 	ClientROBuffer    []ClientEntry
 	ClientOtherBuffer []ClientEntry
