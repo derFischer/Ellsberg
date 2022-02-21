@@ -182,12 +182,10 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	votes := make([]bool, total)
 	alive := make(map[Ctx]Connection)
 	matchIndex := make([]uint64, total)
-	checkAliveCtx := make(map[uint64][]Ctx)
 
 	for i := 0; i < total; i++ {
 		votes[i] = false
 		matchIndex[i] = 0
-		checkAliveCtx[peers[i]] = make([]Ctx, 0)
 	}
 
 	//hack the initial state
@@ -207,6 +205,7 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	sl.mmatchIndex = matchIndex
 	sl.peers = peers
 	sl.MsgCh = make(chan simulationpb.Msg)
+	sl.ReadIndexCtx = make(map[Rctx]RIndex)
 
 	sl.ClientROBuffer = make([]ClientEntry, 0)
 	sl.ClientOtherBuffer = make([]ClientEntry, 0)
