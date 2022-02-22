@@ -136,6 +136,7 @@ type Resp struct {
 	Key   []byte
 	Value []byte
 	ctxs  []Ctx
+	Req   interface{}
 }
 
 type GetReply struct {
@@ -439,7 +440,7 @@ func ClientResponseInterpreter(ce ClientEntry, resp interface{}) Resp {
 	case *pb.RangeResponse:
 		return Resp{Type: ReadResp, Index: ce.Index, Key: resp.(*pb.RangeResponse).Kvs[0].Key, Value: resp.(*pb.RangeResponse).Kvs[0].Value, ctxs: ce.Ctxs}
 	default:
-		return Resp{Type: NormalResp, Index: ce.Index}
+		return Resp{Type: NormalResp, Index: ce.Index, Req: ce.Req}
 	}
 }
 
@@ -550,9 +551,10 @@ func (s *Simulation) HandleClientRequest(req interface{}) {
 		s.ClientROBuffer = append(s.ClientROBuffer, ClientEntry{Req: req, Index: s.ClientRequestHandler(ClientRequestInterpreter(req))})
 	default:
 		//only the leader can process other types of client request
-		if s.State == Leader {
-			s.ClientOtherBuffer = append(s.ClientOtherBuffer, ClientEntry{Req: req, Index: s.ClientRequestHandler(ClientRequestInterpreter(req))})
-		}
+		s.ClientOtherBuffer = append(s.ClientOtherBuffer, ClientEntry{Req: req, Index: s.ClientRequestHandler(ClientRequestInterpreter(req))})
+		// if s.State == Leader {
+		// 	s.ClientOtherBuffer = append(s.ClientOtherBuffer, ClientEntry{Req: req, Index: s.ClientRequestHandler(ClientRequestInterpreter(req))})
+		// }
 	}
 	s.Truncate()
 	return
@@ -729,7 +731,13 @@ func (s *Simulation) ClientReplyChecker(resp Resp) bool {
 		}
 
 	case NormalResp:
-		index := resp.Index
+		index := uint64(math.MaxUint64)
+		for i := resp.Index + 1; i < s.getLastCommandIndex(); i++ {
+			Command := s.getCommand(i)
+			if reflect.DeepEqual(Command.Command.Data, resp.Req) {
+				index = i
+			}
+		}
 		return s.CommitIndex >= index
 	default:
 		return true
@@ -763,6 +771,10 @@ func (s *Simulation) searchGet(r Resp) bool {
 
 	cd := s.getCommand(uint64(first_valid_commit))
 	return bytes.Equal(cd.Command.Value, r.Value)
+}
+
+func (s *Simulation) findMatchLogEntry(r Resp) (bool, uint64) {
+
 }
 
 func (s *Simulation) QuorumActive(ctxs []Ctx) bool {
@@ -803,8 +815,13 @@ func (s *Simulation) ClientRequestHandler(args Op) uint64 {
 			s.mmatchIndex[inSlice(s.peers, s.me)] = s.getLastCommandIndex()
 			return index
 		}
+	} else {
+		if args.Type == EntryKVRO {
+			return math.MaxUint64
+		} else {
+			return s.getLastCommandIndex()
+		}
 	}
-	return math.MaxUint64
 }
 
 func (s *Simulation) RequestVoteRequestHandler(args RequestVoteArgs) RequestVoteReply {
