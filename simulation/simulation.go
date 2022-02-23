@@ -735,7 +735,8 @@ func (s *Simulation) ClientReplyChecker(resp Resp) bool {
 		index := uint64(math.MaxUint64)
 		for i := resp.Index + 1; i < s.getLastCommandIndex(); i++ {
 			Command := s.getCommand(i)
-			if reflect.DeepEqual(Command.Command.Data, resp.Req) {
+			data, _ := ((resp.Req).(*pb.PutRequest)).Marshal()
+			if reflect.DeepEqual(Command.Command.Data, data) {
 				index = i
 			}
 		}
