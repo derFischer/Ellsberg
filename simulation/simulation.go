@@ -369,6 +369,7 @@ func (s *Simulation) logMatch(l []Command) bool {
 			continue
 		}
 		if cmd.Command.Data != nil {
+			log.Printf("!!!!!!!!!!!!!!!!!!log doesnt' match! exec: %+v, simulation: %+v\n", cmd, local_cmd)
 			return false
 		}
 		s.InsertEmtpy(cmd)
