@@ -773,10 +773,6 @@ func (s *Simulation) searchGet(r Resp) bool {
 	return bytes.Equal(cd.Command.Value, r.Value)
 }
 
-func (s *Simulation) findMatchLogEntry(r Resp) (bool, uint64) {
-
-}
-
 func (s *Simulation) QuorumActive(ctxs []Ctx) bool {
 	connected_peers := []uint64{}
 	for i := 0; i < len(ctxs); i++ {
