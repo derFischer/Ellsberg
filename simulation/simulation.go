@@ -569,6 +569,7 @@ func (s *Simulation) HandleRaftReqMessages(msg raftpb.Message) interface{} {
 			log.Fatalf("the prop type is not normal\n")
 		}
 		s.ClientRequestHandler(Op{Type: EntryNormal, Data: msg.Entries[0].Data})
+		log.Printf("!!!!!!!!!!!!!!leader state after prop: %+v\n, %+v\n", msg, s)
 	case raftpb.MsgVote:
 		r := s.RequestVoteRequestHandler(msg_itp.(RequestVoteArgs))
 		return r
