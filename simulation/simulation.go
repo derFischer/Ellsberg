@@ -732,10 +732,15 @@ func (s *Simulation) ClientReplyChecker(resp Resp) bool {
 		}
 
 	case NormalResp:
+		if s.State == Leader {
+			return s.CommitIndex >= resp.Index
+		}
+
 		index := uint64(math.MaxUint64)
+		data, _ := ((resp.Req).(*pb.PutRequest)).Marshal()
+		log.Printf("!!!!!!!!!!!!!!!!follower checks client reply, bytes req: %+v\n", data)
 		for i := resp.Index + 1; i < s.getLastCommandIndex(); i++ {
 			Command := s.getCommand(i)
-			data, _ := ((resp.Req).(*pb.PutRequest)).Marshal()
 			if reflect.DeepEqual(Command.Command.Data, data) {
 				index = i
 			}
