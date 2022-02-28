@@ -437,7 +437,8 @@ func (r *raft) send(args interface{}, m pb.Message) {
 			m.Term = r.Term
 		}
 	}
-	simulationpb.Sending(r.SLmsg, simulationpb.Msg{Send: true, Type: simulationpb.RaftMsg, Msg: m, Req: args})
+
+	simulationpb.Sending(r.SLmsg, simulationpb.Msg{Send: true, Type: simulationpb.RaftM, Msg: simulationpb.RaftMsg{Msg: m, Req: args}})
 	r.msgs = append(r.msgs, m)
 }
 

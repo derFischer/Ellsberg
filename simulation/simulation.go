@@ -149,7 +149,8 @@ type PutAppendReply struct {
 }
 
 type ClientEntry struct {
-	Req   interface{}
+	ReqID interface{}
+	// Req   interface{}
 	Index uint64
 	Ctxs  []Ctx
 }
@@ -216,16 +217,16 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 			select {
 			case msg := <-sl.MsgCh:
 				if msg.Send {
-					if msg.Type == simulationpb.ClientMsg {
-						sl.CheckClientReplyMessage(msg.Msg, msg.Req)
+					if msg.Type == simulationpb.ClientResp {
+						sl.CheckClientReplyMessage((msg.Msg).(simulationpb.ClientReply).Reply, (msg.Msg).(simulationpb.ClientReply).ID)
 					} else {
-						sl.CheckRaftMessage(msg.Msg.(raftpb.Message), msg.Req)
+						sl.CheckRaftMessage((msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message), (msg.Msg).(simulationpb.RaftMsg).Req)
 					}
 				} else {
-					if msg.Type == simulationpb.ClientMsg {
-						sl.HandleClientRequest(msg.Msg)
+					if msg.Type == simulationpb.ClientRequest {
+						sl.HandleClientRequest((msg.Msg).(simulationpb.ClientReq).Req, (msg.Msg).(simulationpb.ClientReq).ID)
 					} else {
-						sl.HandleRaftMessages(msg.Msg.(raftpb.Message))
+						sl.HandleRaftMessages((msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message))
 					}
 				}
 			}
@@ -429,19 +430,24 @@ func ClientRequestInterpreter(req interface{}) Op {
 	switch req.(type) {
 	case *pb.RangeRequest:
 		return Op{Type: EntryKVRO, Key: req.(*pb.RangeRequest).Key}
-	case *pb.PutRequest:
-		return PutRequestInterpreter(req.(*pb.PutRequest))
+	// case *pb.PutRequest:
+	// 	return PutRequestInterpreter(req.(*pb.PutRequest))
 	default:
+		p := (req.(pb.InternalRaftRequest)).Put
+		if p != nil {
+			return PutRequestInterpreter(p)
+		}
 		return Op{Type: EntryNormal}
 	}
 }
 
 func ClientResponseInterpreter(ce ClientEntry, resp interface{}) Resp {
+	// resp = resp.(pb.InternalRaftRequest)
 	switch resp.(type) {
 	case *pb.RangeResponse:
 		return Resp{Type: ReadResp, Index: ce.Index, Key: resp.(*pb.RangeResponse).Kvs[0].Key, Value: resp.(*pb.RangeResponse).Kvs[0].Value, ctxs: ce.Ctxs}
 	default:
-		return Resp{Type: NormalResp, Index: ce.Index, Req: ce.Req}
+		return Resp{Type: NormalResp, Index: ce.Index}
 	}
 }
 
@@ -512,14 +518,14 @@ func (s *Simulation) CheckRaftMessage(msg raftpb.Message, req interface{}) {
 	}
 }
 
-func (s *Simulation) CheckClientReplyMessage(reply interface{}, req interface{}) {
+func (s *Simulation) CheckClientReplyMessage(reply interface{}, ID interface{}) {
 	find := false
 	entry := ClientEntry{}
-	switch req.(type) {
-	case *pb.RangeRequest:
-		find, entry = s.searchInClientBuffer(req, EntryKVRO)
+	switch reply.(type) {
+	case *pb.RangeResponse:
+		find, entry = s.searchInClientBuffer(ID, EntryKVRO)
 	default:
-		find, entry = s.searchInClientBuffer(req, EntryNormal)
+		find, entry = s.searchInClientBuffer(ID, EntryNormal)
 	}
 
 	if !find {
@@ -546,13 +552,13 @@ func (s *Simulation) CheckClientReplyMessage(reply interface{}, req interface{})
 
 //handler function: update the simulation state once receives the requests
 
-func (s *Simulation) HandleClientRequest(req interface{}) {
+func (s *Simulation) HandleClientRequest(req interface{}, ID interface{}) {
 	switch req.(type) {
 	case *pb.RangeRequest:
-		s.ClientROBuffer = append(s.ClientROBuffer, ClientEntry{Req: req, Index: s.ClientRequestHandler(ClientRequestInterpreter(req))})
+		s.ClientROBuffer = append(s.ClientROBuffer, ClientEntry{ReqID: ID, Index: s.ClientRequestHandler(ClientRequestInterpreter(req))})
 	default:
 		//only the leader can process other types of client request
-		s.ClientOtherBuffer = append(s.ClientOtherBuffer, ClientEntry{Req: req, Index: s.ClientRequestHandler(ClientRequestInterpreter(req))})
+		s.ClientOtherBuffer = append(s.ClientOtherBuffer, ClientEntry{ReqID: ID, Index: s.ClientRequestHandler(ClientRequestInterpreter(req))})
 		// if s.State == Leader {
 		// 	s.ClientOtherBuffer = append(s.ClientOtherBuffer, ClientEntry{Req: req, Index: s.ClientRequestHandler(ClientRequestInterpreter(req))})
 		// }
@@ -613,7 +619,7 @@ func (s *Simulation) InitializeCtx(ctx Ctx) {
 	}
 	for i := 0; i < len(s.ClientROBuffer); i++ {
 		entry := s.ClientROBuffer[i]
-		s.ClientROBuffer[i] = ClientEntry{Req: entry.Req, Index: entry.Index, Ctxs: append(entry.Ctxs, ctx)}
+		s.ClientROBuffer[i] = ClientEntry{ReqID: entry.ReqID, Index: entry.Index, Ctxs: append(entry.Ctxs, ctx)}
 	}
 }
 
@@ -624,7 +630,7 @@ func (s *Simulation) InitializeRctx(rctx Ctx) {
 	}
 	for i := 0; i < len(s.ClientROBuffer); i++ {
 		ri := s.ClientROBuffer[i]
-		s.ClientROBuffer[i] = ClientEntry{Req: ri.Req, Index: ri.Index, Ctxs: append(ri.Ctxs, rctx)}
+		s.ClientROBuffer[i] = ClientEntry{ReqID: ri.ReqID, Index: ri.Index, Ctxs: append(ri.Ctxs, rctx)}
 	}
 }
 
@@ -719,7 +725,7 @@ func (s *Simulation) ReadIndexReplyChecker(r_exec ReadIndexReply) bool {
 	if !find {
 		log.Fatalf("cannot find the read only request in the buffer: %+v\n", r_exec)
 	}
-	return s.State == Leader && s.QuorumActive(entry.Ctxs) && r_exec.From == s.me && r_exec.mterm == s.CurrentTerm && reflect.DeepEqual(r_exec.rctx, entry.Req) && r_exec.index >= entry.Index
+	return s.State == Leader && s.QuorumActive(entry.Ctxs) && r_exec.From == s.me && r_exec.mterm == s.CurrentTerm && reflect.DeepEqual(r_exec.rctx, entry.ReqID) && r_exec.index >= entry.Index
 }
 
 func (s *Simulation) ClientReplyChecker(resp Resp) bool {
@@ -880,7 +886,7 @@ func (s *Simulation) ReadIndexRequestHandler(args ReadIndexArgs) {
 		return
 	}
 	if s.State == Leader {
-		s.ClientROBuffer = append(s.ClientROBuffer, ClientEntry{Req: args.rctx, Index: s.ClientRequestHandler(Op{Type: EntryKVRO, Key: nil})})
+		s.ClientROBuffer = append(s.ClientROBuffer, ClientEntry{ReqID: args.rctx, Index: s.ClientRequestHandler(Op{Type: EntryKVRO, Key: nil})})
 	}
 }
 
@@ -990,11 +996,11 @@ func (s *Simulation) updateCommitIndex() {
 	}
 }
 
-func (s *Simulation) searchInClientBuffer(e interface{}, t EntryType) (bool, ClientEntry) {
+func (s *Simulation) searchInClientBuffer(ID interface{}, t EntryType) (bool, ClientEntry) {
 	if t == EntryKVRO {
 		length := len(s.ClientROBuffer)
 		for i := 0; i < length; i++ {
-			if reflect.DeepEqual(s.ClientROBuffer[i].Req, e) {
+			if reflect.DeepEqual(s.ClientROBuffer[i].ReqID, ID) {
 				entry := s.ClientROBuffer[i]
 				s.ClientROBuffer = append(s.ClientROBuffer[:i], s.ClientROBuffer[i+1:]...)
 				return true, entry
@@ -1003,7 +1009,7 @@ func (s *Simulation) searchInClientBuffer(e interface{}, t EntryType) (bool, Cli
 	} else {
 		length := len(s.ClientOtherBuffer)
 		for i := 0; i < length; i++ {
-			if reflect.DeepEqual(s.ClientOtherBuffer[i].Req, e) {
+			if reflect.DeepEqual(s.ClientOtherBuffer[i].ReqID, ID) {
 				entry := s.ClientOtherBuffer[i]
 				s.ClientOtherBuffer = append(s.ClientOtherBuffer[:i], s.ClientOtherBuffer[i+1:]...)
 				return true, entry

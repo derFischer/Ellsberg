@@ -266,6 +266,8 @@ type EtcdServer struct {
 	peerRt   http.RoundTripper
 	reqIDGen *idutil.Generator
 
+	reqSLROIDGen *idutil.Generator
+
 	// forceVersionC is used to force the version monitor loop
 	// to detect the cluster version immediately.
 	forceVersionC chan struct{}
@@ -516,6 +518,7 @@ func NewServer(cfg ServerConfig) (srv *EtcdServer, err error) {
 		SyncTicker:       time.NewTicker(500 * time.Millisecond),
 		peerRt:           prt,
 		reqIDGen:         idutil.NewGenerator(uint16(id), time.Now()),
+		reqSLROIDGen:     idutil.NewGenerator(uint16(id), time.Now()),
 		forceVersionC:    make(chan struct{}),
 		AccessController: &AccessController{CORS: cfg.CORS, HostWhitelist: cfg.HostWhitelist},
 		consistIndex:     cindex.NewConsistentIndex(be.BatchTx()),
@@ -842,7 +845,7 @@ func (s *EtcdServer) Process(ctx context.Context, m raftpb.Message) error {
 	if m.Type == raftpb.MsgApp {
 		s.stats.RecvAppendReq(types.ID(m.From).String(), m.Size())
 	}
-	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: false, Type: simulationpb.RaftMsg, Msg: m})
+	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: false, Type: simulationpb.RaftM, Msg: simulationpb.RaftMsg{Msg: m, Req: nil}})
 	if (m.Type != raftpb.MsgHeartbeat) && (m.Type != raftpb.MsgHeartbeatResp) {
 		log.Printf("simulation receives raft msg: %+v\n", m)
 		s.sl.Dump()
