@@ -520,6 +520,9 @@ func (s *Simulation) CheckRaftMessage(msg raftpb.Message, req interface{}) {
 }
 
 func (s *Simulation) CheckClientReplyMessage(reply interface{}, ID interface{}) {
+	if reply == nil {
+		return
+	}
 	find := false
 	entry := ClientEntry{}
 	switch reply.(type) {
