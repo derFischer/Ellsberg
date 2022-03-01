@@ -533,7 +533,7 @@ func (s *Simulation) CheckClientReplyMessage(reply interface{}, ID interface{}) 
 	}
 
 	if !find {
-		log.Fatalf("%d haven't received the client req %+v before\n", s.me, reply)
+		log.Fatalf("%d haven't received the client req %+v, ID: %+v before\n state: %+v\n", s.me, reply, ID, s)
 	}
 	valid := s.ClientReplyChecker(ClientResponseInterpreter(entry, reply), ID)
 	if !valid {

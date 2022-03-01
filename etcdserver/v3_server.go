@@ -701,7 +701,7 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 
 	select {
 	case x := <-ch:
-		simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: true, Type: simulationpb.ClientResp, Msg: simulationpb.ClientReply{Reply: (x.(*applyResult)).resp, ID: r.ID}})
+		simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: true, Type: simulationpb.ClientResp, Msg: simulationpb.ClientReply{Reply: (x.(*applyResult)).resp, ID: r.Header.ID}})
 		return x.(*applyResult), nil
 	case <-cctx.Done():
 		proposalsFailed.Inc()
