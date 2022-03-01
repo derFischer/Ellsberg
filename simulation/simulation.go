@@ -370,7 +370,7 @@ func (s *Simulation) logMatch(l []Command) bool {
 			continue
 		}
 		if cmd.Command.Data != nil {
-			log.Printf("!!!!!!!!!!!!!!!!!!log doesnt' match! exec: %+v, simulation: %+v\n", cmd, local_cmd)
+			//log.printf("!!!!!!!!!!!!!!!!!!log doesnt' match! exec: %+v, simulation: %+v\n", cmd, local_cmd)
 			return false
 		}
 		s.InsertEmtpy(cmd)
@@ -594,7 +594,7 @@ func (s *Simulation) HandleRaftMessages(msg raftpb.Message) interface{} {
 			log.Fatalf("the prop type is not normal\n")
 		}
 		s.ClientRequestHandler(Op{Type: EntryNormal, Data: msg.Entries[0].Data})
-		log.Printf("!!!!!!!!!!!!!!leader state after prop: %+v\n, %+v\n", msg, s)
+		//log.printf("!!!!!!!!!!!!!!leader state after prop: %+v\n, %+v\n", msg, s)
 	case raftpb.MsgVoteResp:
 		s.RequestVoteReplyHandler(msg_itp.(RequestVoteReply))
 	case raftpb.MsgAppResp:
@@ -706,7 +706,7 @@ func (s *Simulation) RequestVoteReplyChecker(r_exec RequestVoteReply, r_sl Reque
 	// return s.searchInRaftBuffer(r_exec)
 	r := (r_exec == r_sl)
 	if !r {
-		log.Printf("!!!!!!!!!requestvotereplychecker failed. exec: %+v\n sl: %+v\n", r_exec, r_sl)
+		//log.printf("!!!!!!!!!requestvotereplychecker failed. exec: %+v\n sl: %+v\n", r_exec, r_sl)
 	}
 	return r_exec == r_sl
 }
@@ -745,7 +745,7 @@ func (s *Simulation) ClientReplyChecker(resp Resp) bool {
 
 		index := uint64(math.MaxUint64)
 		data, _ := ((resp.Req).(*pb.PutRequest)).Marshal()
-		log.Printf("!!!!!!!!!!!!!!!!follower checks client reply, bytes req: %+v\n", data)
+		//log.printf("!!!!!!!!!!!!!!!!follower checks client reply, bytes req: %+v\n", data)
 		for i := resp.Index + 1; i <= s.getLastCommandIndex(); i++ {
 			Command := s.getCommand(i)
 			if reflect.DeepEqual(Command.Command.Data, data) {
@@ -1121,7 +1121,7 @@ func (s *Simulation) hackEntries(entries []Command) {
 
 //for debug
 func (s *Simulation) Dump() {
-	log.Printf("simulation state: %+v\n", s)
+	//log.printf("simulation state: %+v\n", s)
 }
 
 //helper function

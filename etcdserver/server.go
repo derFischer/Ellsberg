@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"expvar"
 	"fmt"
-	"log"
 	"math"
 	"math/rand"
 	"net/http"
@@ -846,10 +845,10 @@ func (s *EtcdServer) Process(ctx context.Context, m raftpb.Message) error {
 		s.stats.RecvAppendReq(types.ID(m.From).String(), m.Size())
 	}
 	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: false, Type: simulationpb.RaftM, Msg: simulationpb.RaftMsg{Msg: m, Req: nil}})
-	if (m.Type != raftpb.MsgHeartbeat) && (m.Type != raftpb.MsgHeartbeatResp) {
-		log.Printf("simulation receives raft msg: %+v\n", m)
-		s.sl.Dump()
-	}
+	// if (m.Type != raftpb.MsgHeartbeat) && (m.Type != raftpb.MsgHeartbeatResp) {
+	// log.Printf("simulation receives raft msg: %+v\n", m)
+	// s.sl.Dump()
+	// }
 	return s.r.Step(ctx, m)
 }
 
