@@ -136,7 +136,6 @@ type Resp struct {
 	Key   []byte
 	Value []byte
 	ctxs  []Ctx
-	Req   interface{}
 }
 
 type GetReply struct {
@@ -533,7 +532,7 @@ func (s *Simulation) CheckClientReplyMessage(reply interface{}, ID interface{}) 
 	if !find {
 		log.Fatalf("%d haven't received the client req before\n", s.me)
 	}
-	valid := s.ClientReplyChecker(ClientResponseInterpreter(entry, reply))
+	valid := s.ClientReplyChecker(ClientResponseInterpreter(entry, reply), ID)
 	if !valid {
 		log.Fatalf("check reply message error! server: %d, index: %d, reply: %+v\n local state: %+v\n", s.me, entry.Index, reply, s)
 	}
@@ -731,7 +730,7 @@ func (s *Simulation) ReadIndexReplyChecker(r_exec ReadIndexReply) bool {
 	return s.State == Leader && s.QuorumActive(entry.Ctxs) && r_exec.From == s.me && r_exec.mterm == s.CurrentTerm && reflect.DeepEqual(r_exec.rctx, entry.ReqID) && r_exec.index >= entry.Index
 }
 
-func (s *Simulation) ClientReplyChecker(resp Resp) bool {
+func (s *Simulation) ClientReplyChecker(resp Resp, ID interface{}) bool {
 	switch resp.Type {
 	case ReadResp:
 		if s.State == Leader {
@@ -742,17 +741,20 @@ func (s *Simulation) ClientReplyChecker(resp Resp) bool {
 		}
 
 	case NormalResp:
-		if s.State == Leader {
-			return s.CommitIndex >= resp.Index
-		}
+		// if s.State == Leader {
+		// 	return s.CommitIndex >= resp.Index
+		// }
 
 		index := uint64(math.MaxUint64)
-		data, _ := ((resp.Req).(*pb.PutRequest)).Marshal()
+		// data, _ := ((resp.Req).(*pb.PutRequest)).Marshal()
 		//log.printf("!!!!!!!!!!!!!!!!follower checks client reply, bytes req: %+v\n", data)
-		for i := resp.Index + 1; i <= s.getLastCommandIndex(); i++ {
-			Command := s.getCommand(i)
-			if reflect.DeepEqual(Command.Command.Data, data) {
+		for i := resp.Index; i <= s.getLastCommandIndex(); i++ {
+			data := s.getCommand(i).Command.Data
+			req := new(pb.InternalRaftRequest)
+			req.Unmarshal(data)
+			if reflect.DeepEqual(req.Header.ID, ID) {
 				index = i
+				break
 			}
 		}
 		return s.CommitIndex >= index

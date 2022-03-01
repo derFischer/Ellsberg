@@ -668,7 +668,7 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 		r.Header.Username = authInfo.Username
 		r.Header.AuthRevision = authInfo.Revision
 	}
-	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: false, Type: simulationpb.ClientRequest, Msg: simulationpb.ClientReq{Req: r, ID: r.ID}})
+	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: false, Type: simulationpb.ClientRequest, Msg: simulationpb.ClientReq{Req: r, ID: r.Header.ID}})
 
 	data, err := r.Marshal()
 	if err != nil {
