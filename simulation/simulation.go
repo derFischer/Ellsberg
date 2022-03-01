@@ -404,8 +404,8 @@ func CommandInterpreter(command raftpb.Entry) Command {
 		return Command{CommandIndex: command.Index, CommandTerm: command.Term, Command: Op{Type: EntryNormal, Data: command.Data}}
 	}
 	if req.Put != nil {
-		data, _ := (req.Put).Marshal()
-		return Command{CommandIndex: command.Index, CommandTerm: command.Term, Command: Op{Type: EntryKVPut, Key: req.Put.Key, Value: req.Put.Value, Data: data}}
+		// data, _ := (req.Put).Marshal()
+		return Command{CommandIndex: command.Index, CommandTerm: command.Term, Command: Op{Type: EntryKVPut, Key: req.Put.Key, Value: req.Put.Value, Data: command.Data}}
 	}
 	return Command{CommandIndex: command.Index, CommandTerm: command.Term, Command: Op{Type: EntryNormal, Data: command.Data}}
 }
@@ -418,11 +418,11 @@ func CommandsInterpreter(commands []raftpb.Entry) []Command {
 	return result
 }
 
-func PutRequestInterpreter(req *pb.PutRequest) Op {
-	data, err := req.Marshal()
-	if err != nil {
-		log.Fatalf("put request interpreter marshal failed: %+v\n", req)
-	}
+func PutRequestInterpreter(req *pb.PutRequest, data []byte) Op {
+	// data, err := r.Marshal()
+	// if err != nil {
+	// 	log.Fatalf("put request interpreter marshal failed: %+v\n", req)
+	// }
 	return Op{Type: EntryKVPut, Key: req.Key, Value: req.Value, Data: data}
 }
 
@@ -433,11 +433,13 @@ func ClientRequestInterpreter(req interface{}) Op {
 	// case *pb.PutRequest:
 	// 	return PutRequestInterpreter(req.(*pb.PutRequest))
 	default:
-		p := (req.(pb.InternalRaftRequest)).Put
+		req := pb.InternalRaftRequest(req.(pb.InternalRaftRequest))
+		data, _ := req.Marshal()
+		p := req.Put
 		if p != nil {
-			return PutRequestInterpreter(p)
+			return PutRequestInterpreter(p, data)
 		}
-		return Op{Type: EntryNormal}
+		return Op{Type: EntryNormal, Data: data}
 	}
 }
 
@@ -593,7 +595,8 @@ func (s *Simulation) HandleRaftMessages(msg raftpb.Message) interface{} {
 		if msg.Entries[0].Type != raftpb.EntryNormal {
 			log.Fatalf("the prop type is not normal\n")
 		}
-		s.ClientRequestHandler(Op{Type: EntryNormal, Data: msg.Entries[0].Data})
+		command := CommandInterpreter(msg.Entries[0])
+		s.ClientRequestHandler(command.Command)
 		//log.printf("!!!!!!!!!!!!!!leader state after prop: %+v\n, %+v\n", msg, s)
 	case raftpb.MsgVoteResp:
 		s.RequestVoteReplyHandler(msg_itp.(RequestVoteReply))
