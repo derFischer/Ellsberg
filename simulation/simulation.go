@@ -244,6 +244,7 @@ func Equal(arg1 uint64, arg2 uint64) bool {
 	} else {
 		return arg1 == arg2
 	}
+
 }
 
 func SliceEqual(arg1 []Command, arg2 []Command) bool {
@@ -629,13 +630,18 @@ func (s *Simulation) InitializeCtx(ctx Ctx) {
 }
 
 func (s *Simulation) InitializeRctx(rctx Ctx) {
-	found := s.searchRctx(rctx, true, len(s.ClientROBuffer))
+	refs := len(s.ClientROBuffer)
+	found := s.searchRctx(rctx, true, refs)
 	if found {
 		return
 	}
-	for i := 0; i < len(s.ClientROBuffer); i++ {
+	var i int
+	for i = 0; i < len(s.ClientROBuffer); i++ {
 		ri := s.ClientROBuffer[i]
 		s.ClientROBuffer[i] = ClientEntry{ReqID: ri.ReqID, Index: ri.Index, Ctxs: append(ri.Ctxs, rctx)}
+	}
+	if i != refs {
+		log.Fatal("the length of clientROBuffer has been changed!\n")
 	}
 }
 
