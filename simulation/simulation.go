@@ -2,6 +2,7 @@ package simulation
 
 import (
 	"bytes"
+	"fmt"
 	"log"
 	"math"
 	"reflect"
@@ -215,6 +216,7 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 		for {
 			select {
 			case msg := <-sl.MsgCh:
+				fmt.Printf("the msg is %+v\n, current state: %+v\n", msg, sl)
 				if msg.Send {
 					if msg.Type == simulationpb.ClientResp {
 						sl.CheckClientReplyMessage((msg.Msg).(simulationpb.ClientReply).Reply, (msg.Msg).(simulationpb.ClientReply).ID)
