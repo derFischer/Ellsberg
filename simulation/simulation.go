@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"reflect"
+	"runtime/debug"
 	"sort"
 	"sync"
 
@@ -639,6 +640,7 @@ func (s *Simulation) InitializeCtx(ctx Ctx) {
 }
 
 func (s *Simulation) InitializeRctx(rctx Ctx) {
+	debug.PrintStack()
 	refs := len(s.ClientROBuffer)
 	found := s.searchRctx(rctx, true, refs)
 	if found {
