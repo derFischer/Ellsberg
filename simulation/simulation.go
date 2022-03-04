@@ -673,6 +673,7 @@ func (s *Simulation) ConnectionAlive(id uint64, ctx Ctx) {
 }
 
 func (s *Simulation) RctxIndex(rctx Ctx, index uint64) {
+	fmt.Printf("!!!!!!!!!!!!!!!!!!!before update rctx: %+v\n", s.ClientROBuffer)
 	found := s.searchRctx(rctx, false, 0)
 	if found {
 		ri := s.ReadIndexCtx[rctx]
@@ -680,6 +681,7 @@ func (s *Simulation) RctxIndex(rctx Ctx, index uint64) {
 			s.ReadIndexCtx[rctx] = RIndex{ref: ri.ref, index: index}
 		}
 	}
+	fmt.Printf("!!!!!!!!!!!!!!!!!!!after update rctx: %+v\n", s.ClientROBuffer)
 }
 
 //checker: check whether the message is correct
