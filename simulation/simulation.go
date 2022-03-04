@@ -601,6 +601,9 @@ func (s *Simulation) HandleRaftReqMessages(msg raftpb.Message) interface{} {
 }
 
 func (s *Simulation) HandleRaftMessages(msg raftpb.Message) interface{} {
+	if msg.Type != raftpb.MsgHeartbeat && msg.Type != raftpb.MsgHeartbeatResp {
+		fmt.Printf("the msg is %+v\n, current state: %+v\n", msg, s)
+	}
 	msg_itp, from, _, ctx := s.MsgInterpreter(msg)
 	s.ConnectionAlive(from, ctx)
 	switch msg.Type {
