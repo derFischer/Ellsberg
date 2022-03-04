@@ -216,9 +216,9 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 		for {
 			select {
 			case msg := <-sl.MsgCh:
-				fmt.Printf("the msg is %+v\n, current state: %+v\n", msg, sl)
 				if msg.Send {
 					if msg.Type == simulationpb.ClientResp {
+						fmt.Printf("the msg is %+v\n, current state: %+v\n", msg, sl)
 						sl.CheckClientReplyMessage((msg.Msg).(simulationpb.ClientReply).Reply, (msg.Msg).(simulationpb.ClientReply).ID)
 					} else {
 						sl.CheckRaftMessage((msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message), (msg.Msg).(simulationpb.RaftMsg).Req)
@@ -494,6 +494,9 @@ func (s *Simulation) MsgInterpreter(msg raftpb.Message) (interface{}, uint64, ui
 //call From the upper layer
 //checker function: check whether the messages are valid before actually send them out
 func (s *Simulation) CheckRaftMessage(msg raftpb.Message, req interface{}) {
+	if msg.Type != raftpb.MsgHeartbeat && msg.Type != raftpb.MsgHeartbeatResp {
+		fmt.Printf("the msg is %+v\n, current state: %+v\n", msg, s)
+	}
 	valid := true
 	msg_itp, _, _, ctx := s.MsgInterpreter(msg)
 	s.InitializeCtx(ctx)
@@ -560,6 +563,7 @@ func (s *Simulation) CheckClientReplyMessage(reply interface{}, ID interface{}) 
 //handler function: update the simulation state once receives the requests
 
 func (s *Simulation) HandleClientRequest(req interface{}, ID interface{}) {
+	fmt.Printf("the msg is %+v\n, current state: %+v\n", req, s)
 	switch req.(type) {
 	case *pb.RangeRequest:
 		s.ClientROBuffer = append(s.ClientROBuffer, ClientEntry{ReqID: ID, Index: s.ClientRequestHandler(ClientRequestInterpreter(req))})
@@ -575,6 +579,9 @@ func (s *Simulation) HandleClientRequest(req interface{}, ID interface{}) {
 }
 
 func (s *Simulation) HandleRaftReqMessages(msg raftpb.Message) interface{} {
+	if msg.Type != raftpb.MsgHeartbeat && msg.Type != raftpb.MsgHeartbeatResp {
+		fmt.Printf("the msg is %+v\n, current state: %+v\n", msg, s)
+	}
 	msg_itp, from, _, ctx := s.MsgInterpreter(msg)
 	s.ConnectionAlive(from, ctx)
 	switch msg.Type {
