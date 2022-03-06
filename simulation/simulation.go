@@ -644,6 +644,7 @@ func (s *Simulation) InitializeCtx(ctx Ctx) {
 
 func (s *Simulation) InitializeRctx(rctx Ctx) {
 	debug.PrintStack()
+	fmt.Printf("!!!!!!!!!!!!!!!!!!!!start initialize rctx, the ctx is: %+v\n", rctx)
 	refs := len(s.ClientROBuffer)
 	found := s.searchRctx(rctx, true, refs)
 	if found {
@@ -657,6 +658,7 @@ func (s *Simulation) InitializeRctx(rctx Ctx) {
 	if i != refs {
 		log.Fatal("the length of clientROBuffer has been changed!\n")
 	}
+	fmt.Printf("!!!!!!!!!!!!!!!!!!!!after initialize rctx, the state is: %+v\n", s)
 }
 
 func (s *Simulation) ConnectionAlive(id uint64, ctx Ctx) {
