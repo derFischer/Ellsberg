@@ -221,21 +221,21 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 					if msg.Type == simulationpb.ClientResp {
 						// fmt.Printf("the msg is %+v\n, current state: %+v\n", msg, sl)
 						sl.CheckClientReplyMessage((msg.Msg).(simulationpb.ClientReply).Reply, (msg.Msg).(simulationpb.ClientReply).ID)
-						fmt.Printf("the msg is %+v\n, current state: %+v\n", msg, sl)
+						fmt.Printf("the msg is %+v\n, current state: %+v\n", msg, sl.ClientROBuffer)
 					} else {
 						sl.CheckRaftMessage((msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message), (msg.Msg).(simulationpb.RaftMsg).Req)
 						if (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeat && (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeatResp {
-							fmt.Printf("the msg is %+v\n, current state: %+v\n", msg, sl)
+							fmt.Printf("the msg is %+v\n, current state: %+v\n", msg, sl.ClientROBuffer)
 						}
 					}
 				} else {
 					if msg.Type == simulationpb.ClientRequest {
 						sl.HandleClientRequest((msg.Msg).(simulationpb.ClientReq).Req, (msg.Msg).(simulationpb.ClientReq).ID)
-						fmt.Printf("the msg is %+v\n, current state: %+v\n", msg, sl)
+						fmt.Printf("the msg is %+v\n, current state: %+v\n", msg, sl.ClientROBuffer)
 					} else {
 						sl.HandleRaftMessages((msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message))
 						if (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeat && (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeatResp {
-							fmt.Printf("the msg is %+v\n, current state: %+v\n", msg, sl)
+							fmt.Printf("the msg is %+v\n, current state: %+v\n", msg, sl.ClientROBuffer)
 						}
 					}
 				}
@@ -621,6 +621,7 @@ func (s *Simulation) HandleRaftMessages(msg raftpb.Message) interface{} {
 	case raftpb.MsgReadIndex:
 		s.ReadIndexRequestHandler(msg_itp.(ReadIndexArgs))
 	case raftpb.MsgReadIndexResp:
+		fmt.Printf("!!!!!!!!!!!!!!!handle msg read index resp, state before: %+v\n", s.ClientROBuffer)
 		s.ReadIndexReplyHandler(msg_itp.(ReadIndexReply))
 	}
 	return nil
