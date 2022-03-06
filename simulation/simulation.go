@@ -6,7 +6,6 @@ import (
 	"log"
 	"math"
 	"reflect"
-	"runtime/debug"
 	"sort"
 	"sync"
 
@@ -220,31 +219,15 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 				if msg.Send {
 					if msg.Type == simulationpb.ClientResp {
 						// fmt.Printf("the msg is %+v\n, current state: %+v\n", msg, sl)
-						fmt.Printf("before sending the msg is %+v\n, current state: %+v\n", msg, sl.ClientROBuffer)
 						sl.CheckClientReplyMessage((msg.Msg).(simulationpb.ClientReply).Reply, (msg.Msg).(simulationpb.ClientReply).ID)
-						fmt.Printf("after sending the msg is %+v\n, current state: %+v\n", msg, sl.ClientROBuffer)
 					} else {
-						if (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeat && (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeatResp {
-							fmt.Printf("before sending the msg is %+v\n, current state: %+v\n", msg, sl.ClientROBuffer)
-						}
 						sl.CheckRaftMessage((msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message), (msg.Msg).(simulationpb.RaftMsg).Req)
-						if (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeat && (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeatResp {
-							fmt.Printf("after sending the msg is %+v\n, current state: %+v\n", msg, sl.ClientROBuffer)
-						}
 					}
 				} else {
 					if msg.Type == simulationpb.ClientRequest {
-						fmt.Printf("before receive the msg is %+v\n, current state: %+v\n", msg, sl.ClientROBuffer)
 						sl.HandleClientRequest((msg.Msg).(simulationpb.ClientReq).Req, (msg.Msg).(simulationpb.ClientReq).ID)
-						fmt.Printf("after receive the msg is %+v\n, current state: %+v\n", msg, sl.ClientROBuffer)
 					} else {
-						if (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeat && (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeatResp {
-							fmt.Printf("before receive the msg is %+v\n, current state: %+v\n", msg, sl.ClientROBuffer)
-						}
 						sl.HandleRaftMessages((msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message))
-						if (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeat && (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeatResp {
-							fmt.Printf("after receive the msg is %+v\n, current state: %+v\n", msg, sl.ClientROBuffer)
-						}
 					}
 				}
 			}
@@ -629,14 +612,13 @@ func (s *Simulation) HandleRaftMessages(msg raftpb.Message) interface{} {
 	case raftpb.MsgReadIndex:
 		s.ReadIndexRequestHandler(msg_itp.(ReadIndexArgs))
 	case raftpb.MsgReadIndexResp:
-		fmt.Printf("!!!!!!!!!!!!!!!handle msg read index resp, state before: %+v\n", s.ClientROBuffer)
 		s.ReadIndexReplyHandler(msg_itp.(ReadIndexReply))
 	}
 	return nil
 }
 
 func (s *Simulation) InitializeCtx(ctx Ctx) {
-	if ctx == nil {
+	if ctx == nil || s.State != Leader {
 		return
 	}
 	found := s.searchConnection(ctx, true, len(s.ClientROBuffer))
@@ -650,8 +632,6 @@ func (s *Simulation) InitializeCtx(ctx Ctx) {
 }
 
 func (s *Simulation) InitializeRctx(rctx Ctx) {
-	debug.PrintStack()
-	fmt.Printf("!!!!!!!!!!!!!!!!!!!!start initialize rctx, the ctx is: %+v\n", rctx)
 	refs := len(s.ClientROBuffer)
 	found := s.searchRctx(rctx, true, refs)
 	if found {
@@ -665,7 +645,6 @@ func (s *Simulation) InitializeRctx(rctx Ctx) {
 	if i != refs {
 		log.Fatal("the length of clientROBuffer has been changed!\n")
 	}
-	fmt.Printf("!!!!!!!!!!!!!!!!!!!!after initialize rctx, the state is: %+v\n", s)
 }
 
 func (s *Simulation) ConnectionAlive(id uint64, ctx Ctx) {

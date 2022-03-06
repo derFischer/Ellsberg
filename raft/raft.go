@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"log"
 	"math"
 	"math/rand"
 	"sort"
@@ -1114,7 +1113,6 @@ func stepLeader(r *raft, m pb.Message) error {
 		switch r.readOnly.option {
 		// If more than the local vote is needed, go through a full broadcast.
 		case ReadOnlySafe:
-			log.Printf("!!!!!!!!!!!!!!!!the leader will broadcase hrtbeat with ctx:%+v\n", m.Entries[0].Data)
 			r.readOnly.addRequest(r.raftLog.committed, m)
 			// The local node automatically acks the request.
 			r.readOnly.recvAck(r.id, m.Entries[0].Data)
