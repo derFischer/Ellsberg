@@ -698,7 +698,7 @@ func (s *Simulation) AppendEntryRequestChecker(args AppendEntriesArgs) bool {
 	}
 
 	//hack the initial state
-	if args.mprevLogIndex <= 8 {
+	if args.mprevLogIndex <= 7 {
 		s.hackEntries(args.mentries)
 		return true
 	}
