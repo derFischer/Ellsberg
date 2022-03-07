@@ -1035,6 +1035,7 @@ func stepLeader(r *raft, m pb.Message) error {
 		// reque := new(etcdserverpb.InternalRaftRequest)
 		// reque.Unmarshal(m.Entries[0].Data)
 		// r.logger.Infof("%x receives propose %+v\n", r.id, reque)
+		fmt.Printf("raft receives new prop: %+v\n", m)
 		if len(m.Entries) == 0 {
 			r.logger.Panicf("%x stepped empty MsgProp", r.id)
 		}
