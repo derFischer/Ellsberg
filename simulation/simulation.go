@@ -221,15 +221,28 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 					if msg.Type == simulationpb.ClientResp {
 						// fmt.Printf("the msg is %+v\n, current state: %+v\n", msg, sl)
 						sl.CheckClientReplyMessage((msg.Msg).(simulationpb.ClientReply).Reply, (msg.Msg).(simulationpb.ClientReply).ID)
+						// fmt.Printf("the msg is %+v\n, current state: %+v\n", msg, sl)
 					} else {
+						// if (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeat && (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeatResp {
+						// 	fmt.Printf("msg is: %+v, before: %+v\n", msg, sl)
+						// }
 						sl.CheckRaftMessage((msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message), (msg.Msg).(simulationpb.RaftMsg).Req)
+						// if (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeat && (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeatResp {
+						// 	fmt.Printf("msg is: %+v, after: %+v\n", msg, sl)
+						// }
 					}
 				} else {
 					if msg.Type == simulationpb.ClientRequest {
 						sl.HandleClientRequest((msg.Msg).(simulationpb.ClientReq).Req, (msg.Msg).(simulationpb.ClientReq).ID)
 						// fmt.Printf("the client req is: %+v\n, state: %+v\n", msg, sl)
 					} else {
+						// if (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeat && (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeatResp {
+						// 	fmt.Printf("msg is: %+v, before: %+v\n", msg, sl)
+						// }
 						sl.HandleRaftMessages((msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message))
+						// if (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeat && (msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message).Type != raftpb.MsgHeartbeatResp {
+						// 	fmt.Printf("msg is: %+v, after: %+v\n", msg, sl)
+						// }
 					}
 				}
 			}
@@ -777,10 +790,13 @@ func (s *Simulation) ClientReplyChecker(resp Resp, ID interface{}) bool {
 		// 	return s.CommitIndex >= resp.Index
 		// }
 
-		index := uint64(math.MaxUint64)
+		index := uint64(0)
 		// data, _ := ((resp.Req).(*pb.PutRequest)).Marshal()
 		//log.printf("!!!!!!!!!!!!!!!!follower checks client reply, bytes req: %+v\n", data)
 		for i := resp.Index; i <= s.getLastCommandIndex(); i++ {
+			if i < s.getFirstCommandIndex() {
+				continue
+			}
 			data := s.getCommand(i).Command.Data
 			req := new(pb.InternalRaftRequest)
 			req.Unmarshal(data)
