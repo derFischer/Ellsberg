@@ -176,6 +176,8 @@ type Simulation struct {
 
 	ClientROBuffer    []ClientEntry
 	ClientOtherBuffer []ClientEntry
+
+	PendingClientReq []Op
 }
 
 func StartSimulationServer(id uint64, peers []uint64) *Simulation {
@@ -225,6 +227,7 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 				} else {
 					if msg.Type == simulationpb.ClientRequest {
 						sl.HandleClientRequest((msg.Msg).(simulationpb.ClientReq).Req, (msg.Msg).(simulationpb.ClientReq).ID)
+						// fmt.Printf("the client req is: %+v\n, state: %+v\n", msg, sl)
 					} else {
 						sl.HandleRaftMessages((msg.Msg).(simulationpb.RaftMsg).Msg.(raftpb.Message))
 					}
@@ -326,7 +329,18 @@ func (s *Simulation) entryInLog(args Op) (bool, Command) {
 	return false, Command{}
 }
 
-func (s *Simulation) InsertEmtpy(in_cmd Command) {
+func (s *Simulation) checkPendingReq(req Op) bool {
+	for i := 0; i < len(s.PendingClientReq); i++ {
+		r := s.PendingClientReq[i]
+		if reflect.DeepEqual(r.Data, req.Data) {
+			s.PendingClientReq = append(s.PendingClientReq[:i], s.PendingClientReq[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Simulation) Insert(in_cmd Command) {
 	index := in_cmd.CommandIndex
 	if index < s.getFirstCommandIndex() {
 		log.Fatal("the log has already been truncated, cannot insert the emtpy entry\n")
@@ -361,20 +375,26 @@ func (s *Simulation) logMatch(l []Command) bool {
 			continue
 		}
 		if local_cmd.CommandIndex == NONEXIST {
-			if !(cmd.Command.Data == nil && cmd.CommandIndex == s.getLastCommandIndex()+1) {
-				return false
+			// if !(cmd.Command.Data == nil && cmd.CommandIndex == s.getLastCommandIndex()+1) {
+			// 	return false
+			// }
+			if cmd.Command.Data == nil {
+				s.Insert(cmd)
+				continue
 			}
-			s.InsertEmtpy(cmd)
-			continue
+			if s.checkPendingReq(cmd.Command) {
+				s.Insert(cmd)
+				continue
+			}
+			return false
 		}
 		if reflect.DeepEqual(cmd, local_cmd) {
 			continue
 		}
 		if cmd.Command.Data != nil {
-			//log.printf("!!!!!!!!!!!!!!!!!!log doesnt' match! exec: %+v, simulation: %+v\n", cmd, local_cmd)
 			return false
 		}
-		s.InsertEmtpy(cmd)
+		s.Insert(cmd)
 	}
 	return true
 }
@@ -836,11 +856,12 @@ func (s *Simulation) ClientRequestHandler(args Op) uint64 {
 		if args.Type == EntryKVRO {
 			return s.CommitIndex
 		} else {
-			index := s.getLastCommandIndex() + 1
-			command := Command{Command: args, CommandIndex: index, CommandTerm: s.CurrentTerm}
-			s.Log = append(s.Log, command)
-			s.mmatchIndex[inSlice(s.peers, s.me)] = s.getLastCommandIndex()
-			return index
+			// index := s.getLastCommandIndex() + 1
+			// command := Command{Command: args, CommandIndex: index, CommandTerm: s.CurrentTerm}
+			// s.Log = append(s.Log, command)
+			// s.mmatchIndex[inSlice(s.peers, s.me)] = s.getLastCommandIndex()
+			s.PendingClientReq = append(s.PendingClientReq, args)
+			return s.getLastCommandIndex()
 		}
 	} else {
 		if args.Type == EntryKVRO {
@@ -1004,6 +1025,7 @@ func (s *Simulation) Leader() {
 }
 
 func (s *Simulation) updateCommitIndex() {
+	s.mmatchIndex[inSlice(s.peers, s.me)] = s.getLastCommandIndex()
 	majority := findMajority(s.mmatchIndex)
 	if majority > s.CommitIndex {
 		command := s.getCommand(majority)
