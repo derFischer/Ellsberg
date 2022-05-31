@@ -27,10 +27,10 @@ import (
 	pb "go.etcd.io/etcd/v3/etcdserver/etcdserverpb"
 	"go.etcd.io/etcd/v3/lease"
 	"go.etcd.io/etcd/v3/lease/leasehttp"
+	"go.etcd.io/etcd/v3/messagepb"
 	"go.etcd.io/etcd/v3/mvcc"
 	"go.etcd.io/etcd/v3/pkg/traceutil"
 	"go.etcd.io/etcd/v3/raft"
-	"go.etcd.io/etcd/v3/simulationpb"
 
 	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
@@ -115,7 +115,7 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 
 	id := s.reqSLROIDGen.Next()
 	//reply checker
-	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: false, Type: simulationpb.ClientRequest, Msg: simulationpb.ClientReq{Req: r, ID: id}})
+	messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.ClientRequest, Msg: messagepb.ClientReq{Req: r, ID: id}})
 
 	if !r.Serializable {
 		err = s.linearizableReadNotify(ctx)
@@ -134,12 +134,12 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 		return nil, err
 	}
 	//check reply here
-	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: true, Type: simulationpb.ClientResp, Msg: simulationpb.ClientReply{Reply: resp, ID: id}})
+	messagepb.Sending(s.SLmsg, messagepb.Msg{Send: true, Type: messagepb.ClientResp, Msg: messagepb.ClientReply{Reply: resp, ID: id}})
 	return resp, err
 }
 
 func (s *EtcdServer) Put(ctx context.Context, r *pb.PutRequest) (*pb.PutResponse, error) {
-	// simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: false, Type: simulationpb.ClientMsg, Msg: r})
+	// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.ClientMsg, Msg: r})
 	// d, _ := r.Marshal()
 	// log.Printf("!!!!!!!!!!!!!!!!!!!!!!request before process: %+v\n", d)
 	ctx = context.WithValue(ctx, traceutil.StartTimeKey, time.Now())
@@ -148,7 +148,7 @@ func (s *EtcdServer) Put(ctx context.Context, r *pb.PutRequest) (*pb.PutResponse
 		return nil, err
 	}
 	// log.Printf("!!!!!!!!!!!!!!!!!!!!!!request after process: %+v\n", r)
-	// simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: true, Type: simulationpb.ClientMsg, Msg: resp, Req: r})
+	// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: true, Type: messagepb.ClientMsg, Msg: resp, Req: r})
 	return resp.(*pb.PutResponse), nil
 }
 
@@ -668,7 +668,7 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 		r.Header.Username = authInfo.Username
 		r.Header.AuthRevision = authInfo.Revision
 	}
-	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: false, Type: simulationpb.ClientRequest, Msg: simulationpb.ClientReq{Req: r, ID: r.Header.ID}})
+	messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.ClientRequest, Msg: messagepb.ClientReq{Req: r, ID: r.Header.ID}})
 
 	data, err := r.Marshal()
 	if err != nil {
@@ -701,7 +701,7 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 
 	select {
 	case x := <-ch:
-		simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: true, Type: simulationpb.ClientResp, Msg: simulationpb.ClientReply{Reply: (x.(*applyResult)).resp, ID: r.Header.ID}})
+		messagepb.Sending(s.SLmsg, messagepb.Msg{Send: true, Type: messagepb.ClientResp, Msg: messagepb.ClientReply{Reply: (x.(*applyResult)).resp, ID: r.Header.ID}})
 		return x.(*applyResult), nil
 	case <-cctx.Done():
 		proposalsFailed.Inc()

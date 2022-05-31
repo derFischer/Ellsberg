@@ -50,6 +50,7 @@ import (
 	pb "go.etcd.io/etcd/v3/etcdserver/etcdserverpb"
 	"go.etcd.io/etcd/v3/lease"
 	"go.etcd.io/etcd/v3/lease/leasehttp"
+	"go.etcd.io/etcd/v3/messagepb"
 	"go.etcd.io/etcd/v3/mvcc"
 	"go.etcd.io/etcd/v3/mvcc/backend"
 	"go.etcd.io/etcd/v3/pkg/fileutil"
@@ -63,7 +64,6 @@ import (
 	"go.etcd.io/etcd/v3/raft"
 	"go.etcd.io/etcd/v3/raft/raftpb"
 	"go.etcd.io/etcd/v3/simulation"
-	"go.etcd.io/etcd/v3/simulationpb"
 	"go.etcd.io/etcd/v3/version"
 	"go.etcd.io/etcd/v3/wal"
 )
@@ -200,7 +200,7 @@ type EtcdServer struct {
 	sl           *simulation.Simulation
 
 	//simulation msg chan
-	SLmsg chan simulationpb.Msg
+	SLmsg chan messagepb.Msg
 
 	readych chan struct{}
 	Cfg     ServerConfig
@@ -844,7 +844,10 @@ func (s *EtcdServer) Process(ctx context.Context, m raftpb.Message) error {
 	if m.Type == raftpb.MsgApp {
 		s.stats.RecvAppendReq(types.ID(m.From).String(), m.Size())
 	}
-	simulationpb.Sending(s.SLmsg, simulationpb.Msg{Send: false, Type: simulationpb.RaftM, Msg: simulationpb.RaftMsg{Msg: m, Req: nil}})
+
+	if m.Type == raftpb.MsgAppResp || m.Type == raftpb.MsgVoteResp {
+		messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.RaftRequest, Msg: messagepb.RaftMsg{Msg: m, Req: nil}})
+	}
 	// if (m.Type != raftpb.MsgHeartbeat) && (m.Type != raftpb.MsgHeartbeatResp) {
 	// log.Printf("simulation receives raft msg: %+v\n", m)
 	// s.sl.Dump()

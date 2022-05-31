@@ -18,8 +18,8 @@ import (
 	"context"
 	"errors"
 
+	"go.etcd.io/etcd/v3/messagepb"
 	pb "go.etcd.io/etcd/v3/raft/raftpb"
-	"go.etcd.io/etcd/v3/simulationpb"
 )
 
 type SnapshotStatus int
@@ -204,7 +204,7 @@ type Node interface {
 	// Stop performs any necessary termination of the Node.
 	Stop()
 
-	SetMsgCh(mch chan simulationpb.Msg)
+	SetMsgCh(mch chan messagepb.Msg)
 }
 
 type Peer struct {
@@ -286,7 +286,7 @@ func newNode(rn *RawNode) node {
 	}
 }
 
-func (n *node) SetMsgCh(mch chan simulationpb.Msg) { n.rn.raft.setMsgCh(mch) }
+func (n *node) SetMsgCh(mch chan messagepb.Msg) { n.rn.raft.setMsgCh(mch) }
 
 func (n *node) Stop() {
 	select {

@@ -25,11 +25,11 @@ import (
 	"sync"
 	"time"
 
+	"go.etcd.io/etcd/v3/messagepb"
 	"go.etcd.io/etcd/v3/raft/confchange"
 	"go.etcd.io/etcd/v3/raft/quorum"
 	pb "go.etcd.io/etcd/v3/raft/raftpb"
 	"go.etcd.io/etcd/v3/raft/tracker"
-	"go.etcd.io/etcd/v3/simulationpb"
 )
 
 // None is a placeholder node ID used when there is no leader.
@@ -321,7 +321,7 @@ type raft struct {
 	logger Logger
 
 	//simulation
-	SLmsg chan simulationpb.Msg
+	SLmsg chan messagepb.Msg
 }
 
 func newRaft(c *Config) *raft {
@@ -389,7 +389,7 @@ func newRaft(c *Config) *raft {
 	return r
 }
 
-func (r *raft) setMsgCh(mch chan simulationpb.Msg) { r.SLmsg = mch }
+func (r *raft) setMsgCh(mch chan messagepb.Msg) { r.SLmsg = mch }
 
 func (r *raft) hasLeader() bool { return r.lead != None }
 
@@ -437,7 +437,7 @@ func (r *raft) send(args interface{}, m pb.Message) {
 		}
 	}
 
-	simulationpb.Sending(r.SLmsg, simulationpb.Msg{Send: true, Type: simulationpb.RaftM, Msg: simulationpb.RaftMsg{Msg: m, Req: args}})
+	messagepb.Sending(r.SLmsg, messagepb.Msg{Send: true, Type: messagepb.RaftResp, Msg: messagepb.RaftMsg{Msg: m, Req: args}})
 	r.msgs = append(r.msgs, m)
 }
 
