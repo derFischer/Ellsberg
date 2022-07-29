@@ -169,6 +169,7 @@ func (s *State) Leader() {
 func (s *State) updateCommitIndex() {
 	s.MmatchIndex[inSlice(s.Peers, s.Me)] = s.GetLastCommandIndex()
 	majority := findMajority(s.MmatchIndex)
+	// fmt.Printf("the majority index is :%+v\n", majority)
 	if majority > s.CommitIndex {
 		command := s.GetCommand(majority)
 		if command.CommandTerm == s.CurrentTerm {
@@ -302,6 +303,7 @@ func (s *State) GetLogSlice(prevIndex uint64, length uint64) []statepb.Command {
 }
 
 func (s *State) ReceiveVotes(from uint64) {
+	// fmt.Printf("peers are: %+v, from: %+v\n", s.Peers, from)
 	s.Votes[inSlice(s.Peers, from)] = true
 }
 

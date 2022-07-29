@@ -9,9 +9,38 @@ import (
 	"go.etcd.io/etcd/v3/statepb"
 )
 
+func StateEqual(s1 state.State, s2 state.State) bool {
+	if s1.CurrentTerm != s2.CurrentTerm || s1.State != s2.State || s1.VotedFor != s2.VotedFor {
+		return false
+	}
+	if !reflect.DeepEqual(s1.Log, s2.Log) || s1.CommitIndex != s2.CommitIndex {
+		return false
+	}
+	if s1.State == statepb.Candidate {
+		return reflect.DeepEqual(s1.Votes, s2.Votes)
+	}
+	if s1.State == statepb.Leader {
+		return reflect.DeepEqual(s1.MmatchIndex, s2.MmatchIndex)
+	}
+	return true
+}
+
+func CopyState(s state.State) state.State {
+	votes := make([]bool, len(s.Votes))
+	log := make([]statepb.Command, len(s.Log))
+	mmatchIndex := make([]uint64, len(s.MmatchIndex))
+	peers := make([]uint64, len(s.Peers))
+	copy(votes, s.Votes)
+	copy(log, s.Log)
+	copy(mmatchIndex, s.MmatchIndex)
+	copy(peers, s.Peers)
+	r := state.State{Me: s.Me, State: s.State, CurrentTerm: s.CurrentTerm, VotedFor: s.VotedFor, Votes: votes, Log: log, CommitIndex: s.CommitIndex, MmatchIndex: mmatchIndex, Peers: peers}
+	return r
+}
+
 func Apply(st state.State, msg messagepb.Msg) (state.State, interface{}) {
 	t, m, _ := messagepb.MsgInterpreter(msg)
-	s := st
+	s := CopyState(st)
 	switch t {
 	case messagepb.MsgApp:
 		reply := s.AppendEntryRequestHandler(m.(messagepb.AppendEntriesArgs))
@@ -148,12 +177,18 @@ func LogMatch(s1 state.State, pl []statepb.Command, commit_index uint64, matched
 				return true
 			}
 		}
-		if first_index1 < command_index {
+		// if first_index1 < command_index {
+		// 	continue
+		// }
+		if first_index1 > command_index {
 			continue
 		}
 
 		cmd2 := s1.Log[command_index-first_index1]
 		if !commandMatch(cmd, cmd2) {
+			if matched {
+				return false
+			}
 			if cmd.CommandTerm == cmd2.CommandTerm || command_index <= commit_index {
 				return false
 			}
@@ -200,7 +235,8 @@ func StateEnables(s1 statepb.StateType, s2 statepb.StateType) bool {
 	}
 }
 
-func PartialStateMatched(ps state.PartialState, s state.State) (state.State, bool) {
+func PartialStateMatched(ps state.PartialState, st state.State) (state.State, bool) {
+	s := CopyState(st)
 	if ps.State == statepb.Candidate {
 		if ps.CurrentTerm > s.CurrentTerm {
 			if LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps) {
@@ -240,6 +276,7 @@ func PartialStateMatched(ps state.PartialState, s state.State) (state.State, boo
 				}
 			}
 			// s.HackEntries(ps.Log)
+			// fmt.Printf("ps is: %+v\n\n\n, state: %+v\n\n\n, match: %+v\n\n\n", ps, st, StateMatch(s, ps) && TermMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps))
 			return s, StateMatch(s, ps) && TermMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps)
 		}
 	} else if ps.State == statepb.Follower {

@@ -1,6 +1,7 @@
 package simulation
 
 import (
+	"fmt"
 	"log"
 	"sync"
 
@@ -65,23 +66,43 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 }
 
 func (s *Simulation) CheckMsg(msg messagepb.Msg) {
-	//fmt.Printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!start to check msg: %+v\n", msg)
+	fmt.Printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!start to check msg: %+v\n\n\n", msg)
+	// s.dump()
 	tmp_state := make([]partialOrder.Path, 0)
 	for i := 0; i < len(s.States); i++ {
 		paths := partialOrder.ExplorePaths(s.States[i].End_s, s.States[i].Remaining_pending, msg)
+		// fmt.Printf("paths: %+v\n\n\n", paths)
 		tmp_state = append(tmp_state, paths...)
 	}
 	if len(tmp_state) == 0 {
-		//fmt.Printf("No valid states for this message.\n All states: %+v\n The message: %+v\n", s.States, msg)
+		fmt.Printf("No valid states for this message. The message: %+v\n", msg)
+		// s.dump()
+		// fmt.Printf("all possbile states: %+v\n msg is :%+v\n", s.States, msg)
 		log.Fatalf("No valid states for this message.")
+		s.dump()
 	}
-	//fmt.Printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!after check, current states: %+v\n", tmp_state)
+	// fmt.Printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!after check, current states: %+v\n\n\n", tmp_state)
 	s.States = tmp_state
+	// fmt.Printf("all possbile states: %+v\n", len(s.States))
+	s.dump()
+	// fmt.Printf("states size is %+v\n\n", len(s.States))
 }
 
 func (s *Simulation) AddPendings(msg messagepb.Msg) {
 	for i := 0; i < len(s.States); i++ {
+		if partialOrder.Drop(msg, s.States[i].End_s) {
+			continue
+		}
+		t, m, _ := messagepb.MsgInterpreter(msg)
+		fmt.Printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!add %+v %v to pendings\n\n\n", t, m)
 		s.States[i].Remaining_pending = append(s.States[i].Remaining_pending, msg)
+	}
+}
+
+func (s *Simulation) dump() {
+	fmt.Printf("states size is %+v\n\n", len(s.States))
+	for i := 0; i < len(s.States); i++ {
+		fmt.Printf("%+v\n\n\n", s.States[i])
 	}
 }
 
