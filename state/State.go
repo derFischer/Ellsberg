@@ -189,7 +189,12 @@ func (s *State) LogGC() {
 	if local_index == NONEXIST {
 		log.Fatal("The commit index is larger than the end of the log!\n")
 	}
-	s.Log = s.Log[local_index:]
+	if s.CommitIndex < s.GetLastCommandIndex()-100 {
+		s.Log = s.Log[local_index:]
+	} else {
+		s.Log = s.Log[len(s.Log)-100:]
+	}
+	// fmt.Printf("after gc, len of log: %+v\n", s.Log)
 }
 
 //hack function

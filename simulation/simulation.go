@@ -38,6 +38,8 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	//hack the initial state
 	lg := make([]statepb.Command, 4)
 	lg[0] = statepb.Command{CommandIndex: 0}
+	lg[1] = statepb.Command{CommandIndex: 1}
+	lg[2] = statepb.Command{CommandIndex: 2}
 	lg[3] = statepb.Command{CommandIndex: 3, CommandTerm: 1}
 
 	sl := new(Simulation)
@@ -66,7 +68,7 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 }
 
 func (s *Simulation) CheckMsg(msg messagepb.Msg) {
-	fmt.Printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!start to check msg: %+v\n\n\n", msg)
+	// fmt.Printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!start to check msg: %+v\n\n\n", msg)
 	// s.dump()
 	tmp_state := make([]partialOrder.Path, 0)
 	for i := 0; i < len(s.States); i++ {
@@ -76,15 +78,15 @@ func (s *Simulation) CheckMsg(msg messagepb.Msg) {
 	}
 	if len(tmp_state) == 0 {
 		fmt.Printf("No valid states for this message. The message: %+v\n", msg)
+		s.dump()
 		// s.dump()
 		// fmt.Printf("all possbile states: %+v\n msg is :%+v\n", s.States, msg)
 		log.Fatalf("No valid states for this message.")
-		s.dump()
 	}
 	// fmt.Printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!after check, current states: %+v\n\n\n", tmp_state)
 	s.States = tmp_state
 	// fmt.Printf("all possbile states: %+v\n", len(s.States))
-	s.dump()
+	// s.dump()
 	// fmt.Printf("states size is %+v\n\n", len(s.States))
 }
 
@@ -93,16 +95,32 @@ func (s *Simulation) AddPendings(msg messagepb.Msg) {
 		if partialOrder.Drop(msg, s.States[i].End_s) {
 			continue
 		}
-		t, m, _ := messagepb.MsgInterpreter(msg)
-		fmt.Printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!add %+v %v to pendings\n\n\n", t, m)
+		// t, m, _ := messagepb.MsgInterpreter(msg)
+		// fmt.Printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!add %+v %v to pendings\n\n\n", t, m)
 		s.States[i].Remaining_pending = append(s.States[i].Remaining_pending, msg)
 	}
 }
 
+func dumpPath(path partialOrder.Path) {
+	fmt.Printf("STATE: %+v\n", path.End_s.State)
+	fmt.Printf("TERM: %+v\n", path.End_s.CurrentTerm)
+	fmt.Printf("VOTEDFOR: %+v\n", path.End_s.VotedFor)
+	fmt.Printf("VOTES: %+v\n", path.End_s.Votes)
+	fmt.Printf("LOG:%+v\n", path.End_s.Log)
+	fmt.Printf("COMMITINDEX: %+v\n", path.End_s.CommitIndex)
+	fmt.Printf("MMATCHINDEX: %+v\n\n\n", path.End_s.MmatchIndex)
+
+	fmt.Printf("remaining message:\n\n")
+	for i := 0; i < len(path.Remaining_pending); i++ {
+		fmt.Printf("%+v\n", path.Remaining_pending[i])
+	}
+	fmt.Printf("\n\n\n\n")
+}
+
 func (s *Simulation) dump() {
-	fmt.Printf("states size is %+v\n\n", len(s.States))
+	fmt.Printf("-----------------------------------------------states size is %+v\n\n--------------------------------------------------", len(s.States))
 	for i := 0; i < len(s.States); i++ {
-		fmt.Printf("%+v\n\n\n", s.States[i])
+		dumpPath(s.States[i])
 	}
 }
 

@@ -41,21 +41,27 @@ func CopyState(s state.State) state.State {
 func Apply(st state.State, msg messagepb.Msg) (state.State, interface{}) {
 	t, m, _ := messagepb.MsgInterpreter(msg)
 	s := CopyState(st)
+	// defer fmt.Printf("after apply, the size of s log: %+v\n", len(s.Log))
 	switch t {
 	case messagepb.MsgApp:
 		reply := s.AppendEntryRequestHandler(m.(messagepb.AppendEntriesArgs))
+		s.Truncate()
 		return s, reply
 	case messagepb.MsgAppResp:
 		s.AppendEntryReplyHandler(m.(messagepb.AppendEntriesReply))
+		s.Truncate()
 		return s, nil
 	case messagepb.MsgVote:
 		reply := s.RequestVoteRequestHandler(m.(messagepb.RequestVoteArgs))
+		s.Truncate()
 		return s, reply
 	case messagepb.MsgVoteResp:
 		s.RequestVoteReplyHandler(m.(messagepb.RequestVoteReply))
+		s.Truncate()
 		return s, nil
 	case messagepb.ClientRequest:
 		s.ClientRequestHandler(m.(statepb.Op))
+		s.Truncate()
 		return s, nil
 	}
 	return state.State{}, nil
