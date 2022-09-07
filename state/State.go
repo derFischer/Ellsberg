@@ -184,7 +184,7 @@ func (s *State) LogGC() {
 	}
 	local_index := s.GetCurrentIndex(s.CommitIndex)
 	if local_index == TRUNCATED {
-		log.Fatal("The last committed entry has been truncated, incorrect!\n")
+		log.Fatalf("The last committed entry has been truncated, incorrect! commit index: %+v, first index: %+v\n", s.CommitIndex, s.GetFirstCommandIndex())
 	}
 	if local_index == NONEXIST {
 		log.Fatal("The commit index is larger than the end of the log!\n")
@@ -192,8 +192,11 @@ func (s *State) LogGC() {
 	if s.CommitIndex < s.GetLastCommandIndex()-100 {
 		s.Log = s.Log[local_index:]
 	} else {
-		s.Log = s.Log[len(s.Log)-100:]
+		s.Log = s.Log[s.GetCurrentIndex(s.GetLastCommandIndex()-100):]
 	}
+	// if s.CommitIndex < s.GetFirstCommandIndex() {
+	// 	log.Fatalf("the commit index: %+v, local index: %+v, last index: %+v\n", s.CommitIndex, local_index, s.GetLastCommandIndex())
+	// }
 	// fmt.Printf("after gc, len of log: %+v\n", s.Log)
 }
 

@@ -171,6 +171,7 @@ func commandMatch(cmd1 statepb.Command, cmd2 statepb.Command) bool {
 }
 
 func LogMatch(s1 state.State, pl []statepb.Command, commit_index uint64, matched bool) bool {
+	// fmt.Printf("logmatch: log1: %+v\n\n  %+v\n\n", s1.Log, pl)
 	first_index1 := s1.GetFirstCommandIndex()
 	last_index1 := s1.GetLastCommandIndex()
 	for i := 0; i < len(pl); i++ {
@@ -192,6 +193,7 @@ func LogMatch(s1 state.State, pl []statepb.Command, commit_index uint64, matched
 
 		cmd2 := s1.Log[command_index-first_index1]
 		if !commandMatch(cmd, cmd2) {
+			// fmt.Printf("cmd: %+v\n, cmd2: %+v\n\n\n", cmd, cmd2)
 			if matched {
 				return false
 			}
@@ -216,7 +218,7 @@ func ParitialStateEnabled(ps state.PartialState, from state.State, msg messagepb
 	if s.CurrentTerm > ps.CurrentTerm {
 		return false
 	}
-	if !LogMatch(from, ps.Log, from.CommitIndex, false) {
+	if !LogMatch(s, ps.Log, from.CommitIndex, false) {
 		return false
 	}
 	if s.CurrentTerm == ps.CurrentTerm && s.VotedFor != ps.VotedFor && ps.VotedFor != statepb.Unknown {

@@ -3,7 +3,7 @@ package partialOrder
 import (
 	// "fmt"
 
-	"log"
+	"fmt"
 	"math"
 	"reflect"
 
@@ -224,8 +224,8 @@ func append_dereplicate(result *[]Path, p Path) {
 	}
 }
 
-func TraverseAllPaths(start_s state.State, end_s EndState, position int, current_msg messagepb.Msg, p []messagepb.Msg, v_index []int, result *[]Path, counter *int) {
-	*counter = *counter + 1
+func TraverseAllPaths(start_s state.State, end_s EndState, position int, current_msg messagepb.Msg, p []messagepb.Msg, v_index []int, result *[]Path, round *int, counter *int) {
+	*round = *round + 1
 	// fmt.Printf("enter traverse paths\n\n\n")
 	// fmt.Printf("the current result set is: %+v\n\n\n", *result)
 	s, matched := matched(start_s, end_s)
@@ -253,16 +253,19 @@ func TraverseAllPaths(start_s state.State, end_s EndState, position int, current
 		valid_index := make([]int, len(v_index))
 		copy(valid_index, v_index)
 
+		*counter = *counter + 1
+
 		if enabled(start_s, pendingMessages[index], end_s) {
 			// fmt.Printf("start state: %+v\n\n\n end state: %+v\n\n\n before apply %+v, the current result set is: %+v\n\n\n", start_s, end_s, pendingMessages[i], *result)
 			s_next, _ := Apply(start_s, pendingMessages[index])
-			if len(s_next.Log) > 110 {
-				log.Fatalf("log length > 100, commit index: %+v, last index: %+v\n", s_next.CommitIndex, s_next.GetLastCommandIndex())
-			}
+			// fmt.Printf("enabled!!! next state: %+v\n end: %+v\n", s_next, end_s)
+			// if len(s_next.Log) > 110 {
+			// 	log.Fatalf("log length > 100, commit index: %+v, last index: %+v\n", s_next.CommitIndex, s_next.GetLastCommandIndex())
+			// }
 			// fmt.Printf("after apply %+v, the current result set is: %+v\n\n\n the state is: %+v\n\n\n", pendingMessages[i], *result, s)
 			// fmt.Printf("before gc: p: %+v, index: %+v, valid_index: %+v", pendingMessages, index, valid_index)
 			pending, in := pendingGC(append(pendingMessages[0:index], pendingMessages[index+1:]...), s_next, index, append(valid_index[0:i], valid_index[i+1:]...))
-			TraverseAllPaths(s_next, end_s, i, pendingMessages[index], pending, in, result, counter)
+			TraverseAllPaths(s_next, end_s, i, pendingMessages[index], pending, in, result, round, counter)
 		}
 	}
 }
@@ -360,9 +363,14 @@ func filterPendings(start state.State, pendingMessages []messagepb.Msg, end inte
 		if start.CommitIndex < end.(state.PartialState).CommitIndex {
 			appResp = true
 		}
-		if !LogMatch(start, end.(state.PartialState).Log, math.MaxUint64, true) {
+		end_length := len(end.(state.PartialState).Log)
+		if start.GetLastCommandIndex() < end.(state.PartialState).Log[end_length-1].CommandIndex {
 			clientReq = true
 		}
+		// if !LogMatch(start, end.(state.PartialState).Log, math.MaxUint64, true) {
+		// 	clientReq = true
+		// }
+		fmt.Printf("filter: VOTE: %+v, APP: %+v, CLIENTREQ: %+v\n", voteResp, appResp, clientReq)
 		res := make([]int, 0)
 		for i := 0; i < len(pendingMessages); i++ {
 			t, _, _ := messagepb.MsgInterpreter(pendingMessages[i])
@@ -403,9 +411,12 @@ func ExplorePaths(start state.State, pendingMessages []messagepb.Msg, end messag
 	////fmt.Printf("MESSAGE IS: %+v\n INFERENCED STATE IS: %+v\n PENDINGS ARE: %+v\n", end, e, pendingMessages)
 	// Explore(path, EndState{End: e, Req: req}, pendingMessages, &result)
 
+	round := 0
 	counter := 0
-	TraverseAllPaths(start, EndState{End: e, Req: req}, 0, messagepb.Msg{}, pendingMessages, filterPendings(start, pendingMessages, e), &result, &counter)
-	// fmt.Printf("explore finished, counter: %+v pending: %+v\n", counter, len(pendingMessages))
+	fp := filterPendings(start, pendingMessages, e)
+	TraverseAllPaths(start, EndState{End: e, Req: req}, 0, messagepb.Msg{}, pendingMessages, fp, &result, &round, &counter)
+	// fmt.Printf("start from %+v\n\n explore %+v\n\n finished, counter: %+v filerted pending: %+v, total pending: %+v\n\n p: %+v\n\n", start, e, counter, len(fp), len(pendingMessages), pendingMessages)
+	fmt.Printf("explore finished, round: %+v counter: %+v filerted pending: %+v\n\n", round, counter, len(fp))
 	return result
 }
 

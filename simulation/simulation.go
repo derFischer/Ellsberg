@@ -78,14 +78,14 @@ func (s *Simulation) CheckMsg(msg messagepb.Msg) {
 	}
 	if len(tmp_state) == 0 {
 		fmt.Printf("No valid states for this message. The message: %+v\n", msg)
-		s.dump()
+		// s.dump()
 		// s.dump()
 		// fmt.Printf("all possbile states: %+v\n msg is :%+v\n", s.States, msg)
 		log.Fatalf("No valid states for this message.")
 	}
 	// fmt.Printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!after check, current states: %+v\n\n\n", tmp_state)
 	s.States = tmp_state
-	// fmt.Printf("all possbile states: %+v\n", len(s.States))
+	fmt.Printf("all possbile states: %+v\n", len(s.States))
 	// s.dump()
 	// fmt.Printf("states size is %+v\n\n", len(s.States))
 }
@@ -118,7 +118,7 @@ func dumpPath(path partialOrder.Path) {
 }
 
 func (s *Simulation) dump() {
-	fmt.Printf("-----------------------------------------------states size is %+v\n\n--------------------------------------------------", len(s.States))
+	fmt.Printf("-----------------------------------------------states size is %+v--------------------------------------------------\n\n", len(s.States))
 	for i := 0; i < len(s.States); i++ {
 		dumpPath(s.States[i])
 	}
