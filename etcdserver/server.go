@@ -845,13 +845,9 @@ func (s *EtcdServer) Process(ctx context.Context, m raftpb.Message) error {
 		s.stats.RecvAppendReq(types.ID(m.From).String(), m.Size())
 	}
 
-	if m.Type == raftpb.MsgAppResp || m.Type == raftpb.MsgVoteResp {
+	if m.Type == raftpb.MsgAppResp || m.Type == raftpb.MsgVoteResp || m.Type == raftpb.MsgHeartbeatResp {
 		messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.RaftRequest, Msg: messagepb.RaftMsg{Msg: m, Req: nil}})
 	}
-	// if (m.Type != raftpb.MsgHeartbeat) && (m.Type != raftpb.MsgHeartbeatResp) {
-	// log.Printf("simulation receives raft msg: %+v\n", m)
-	// s.sl.Dump()
-	// }
 	return s.r.Step(ctx, m)
 }
 

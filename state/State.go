@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"log"
 	"math"
 	"reflect"
@@ -50,7 +51,6 @@ func (s *State) RequestVoteRequestHandler(args messagepb.RequestVoteArgs) messag
 	}
 	r.MTerm = s.CurrentTerm
 	r.MVoteGranted = grant
-	//fmt.Printf("!!!!!!!!!!!!!!!!!!!REQUEST VOTE REQ REPLY: %+v\n", r)
 	return r
 }
 
@@ -169,7 +169,6 @@ func (s *State) Leader() {
 func (s *State) updateCommitIndex() {
 	s.MmatchIndex[inSlice(s.Peers, s.Me)] = s.GetLastCommandIndex()
 	majority := findMajority(s.MmatchIndex)
-	// fmt.Printf("the majority index is :%+v\n", majority)
 	if majority > s.CommitIndex {
 		command := s.GetCommand(majority)
 		if command.CommandTerm == s.CurrentTerm {
@@ -194,10 +193,25 @@ func (s *State) LogGC() {
 	} else {
 		s.Log = s.Log[s.GetCurrentIndex(s.GetLastCommandIndex()-100):]
 	}
-	// if s.CommitIndex < s.GetFirstCommandIndex() {
-	// 	log.Fatalf("the commit index: %+v, local index: %+v, last index: %+v\n", s.CommitIndex, local_index, s.GetLastCommandIndex())
-	// }
-	// fmt.Printf("after gc, len of log: %+v\n", s.Log)
+}
+
+func (s *State) SearchGet(r messagepb.Resp) bool {
+	last_commit_value_match := true
+	for i := s.GetFirstCommandIndex(); i <= s.CommitIndex; i++ {
+		command := s.GetCommand(i)
+		op := command.Command
+		if op.Type != statepb.EntryKVPut || !bytes.Equal(op.Key, r.Key) {
+			continue
+		}
+
+		if bytes.Equal(op.Value, r.Value) {
+			last_commit_value_match = true
+		} else {
+			last_commit_value_match = false
+		}
+	}
+
+	return last_commit_value_match
 }
 
 //hack function
@@ -217,11 +231,6 @@ func (s *State) HackEntries(entries []statepb.Command) {
 			s.Log[local_index] = cmd
 		}
 	}
-}
-
-//for debug
-func (s *State) Dump() {
-	//log.printf("simulation state: %+v\n", s)
 }
 
 //helper function
@@ -338,6 +347,16 @@ func (s *State) appendEntries(entries []statepb.Command) {
 	}
 }
 
+func (s *State) QuorumActive(connections []uint64) bool {
+	count := 0
+	for _, connected_peer := range connections {
+		if inSlice(s.Peers, connected_peer) != -1 {
+			count = count + 1
+		}
+	}
+	return count > len(s.Peers)/2
+}
+
 //helper function
 func max(a uint64, b uint64) uint64 {
 	if a > b {
@@ -356,13 +375,6 @@ func findMajority(array []uint64) uint64 {
 	length := len(cp)
 	return cp[(length-1)/2]
 }
-
-// func OpEqual(op1 statepb.Op, op2 statepb.Op) bool {
-// 	if (op1.Type != op2.Type) || (!bytes.Equal(op1.Key, op2.Key)) || (!bytes.Equal(op1.Value, op2.Value)) || (!bytes.Equal(op1.Data, op2.Data)) {
-// 		return false
-// 	}
-// 	return true
-// }
 
 func inSlice(s []uint64, e uint64) int {
 	if s == nil {

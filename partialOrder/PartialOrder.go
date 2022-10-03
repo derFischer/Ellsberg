@@ -3,7 +3,6 @@ package partialOrder
 import (
 	// "fmt"
 
-	"fmt"
 	"math"
 	"reflect"
 
@@ -30,8 +29,9 @@ type Path struct {
 }
 
 type EndState struct {
-	End interface{}
-	Req interface{}
+	End         interface{}
+	Req         interface{}
+	Connections []uint64
 }
 
 type MinimumPath struct {
@@ -357,6 +357,10 @@ func filterPendings(start state.State, pendingMessages []messagepb.Msg, end inte
 		appResp := false
 		voteResp := false
 		clientReq := false
+		if start.CurrentTerm != end.(state.PartialState).CurrentTerm {
+			voteResp = true
+			appResp = true
+		}
 		if start.State != end.(state.PartialState).State && end.(state.PartialState).State == statepb.Leader {
 			voteResp = true
 		}
@@ -370,7 +374,7 @@ func filterPendings(start state.State, pendingMessages []messagepb.Msg, end inte
 		// if !LogMatch(start, end.(state.PartialState).Log, math.MaxUint64, true) {
 		// 	clientReq = true
 		// }
-		fmt.Printf("filter: VOTE: %+v, APP: %+v, CLIENTREQ: %+v\n", voteResp, appResp, clientReq)
+		// fmt.Printf("filter: VOTE: %+v, APP: %+v, CLIENTREQ: %+v\n", voteResp, appResp, clientReq)
 		res := make([]int, 0)
 		for i := 0; i < len(pendingMessages); i++ {
 			t, _, _ := messagepb.MsgInterpreter(pendingMessages[i])
@@ -400,7 +404,7 @@ func filterPendings(start state.State, pendingMessages []messagepb.Msg, end inte
 	}
 }
 
-func ExplorePaths(start state.State, pendingMessages []messagepb.Msg, end messagepb.Msg) []Path {
+func ExplorePaths(start state.State, pendingMessages []messagepb.Msg, end messagepb.Msg, connections []uint64) []Path {
 	//todo: first interpret the end state
 	// fmt.Printf("!!!!!!!!!!!!!START TO EXPLORE, STATE: %+v\n, PENDINGS: %v\n", start, pendingMessages)
 	path := make([]*node, 0)
@@ -414,9 +418,9 @@ func ExplorePaths(start state.State, pendingMessages []messagepb.Msg, end messag
 	round := 0
 	counter := 0
 	fp := filterPendings(start, pendingMessages, e)
-	TraverseAllPaths(start, EndState{End: e, Req: req}, 0, messagepb.Msg{}, pendingMessages, fp, &result, &round, &counter)
+	TraverseAllPaths(start, EndState{End: e, Req: req, Connections: connections}, 0, messagepb.Msg{}, pendingMessages, fp, &result, &round, &counter)
 	// fmt.Printf("start from %+v\n\n explore %+v\n\n finished, counter: %+v filerted pending: %+v, total pending: %+v\n\n p: %+v\n\n", start, e, counter, len(fp), len(pendingMessages), pendingMessages)
-	fmt.Printf("explore finished, round: %+v counter: %+v filerted pending: %+v\n\n", round, counter, len(fp))
+	// fmt.Printf("explore finished, round: %+v counter: %+v filerted pending: %+v\n\n", round, counter, len(fp))
 	return result
 }
 
@@ -461,6 +465,8 @@ func matched(s state.State, end EndState) (state.State, bool) {
 				}
 			}
 			return s, s.GetCommitIndex() >= uint64(index)
+		} else if end.End.(messagepb.Resp).Type == messagepb.ReadResp {
+			return s, s.QuorumActive(end.Connections) && s.SearchGet(end.End.(messagepb.Resp))
 		}
 	default:
 		s, r := Apply(s, messagepb.Msg{Send: false, Type: messagepb.RaftRequest, Msg: messagepb.RaftMsg{Msg: end.Req.(raftpb.Message)}})

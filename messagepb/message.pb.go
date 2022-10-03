@@ -42,6 +42,7 @@ const (
 // 	Value []byte
 // 	Data  []byte
 // }
+type Ctx interface{}
 
 type RequestVoteArgs struct {
 	From          uint64
@@ -49,6 +50,7 @@ type RequestVoteArgs struct {
 	MTerm         uint64
 	MLastLogIndex uint64
 	MLastLogTerm  uint64
+	ctx           Ctx
 }
 
 type RequestVoteReply struct {
@@ -56,6 +58,7 @@ type RequestVoteReply struct {
 	To           uint64
 	MTerm        uint64
 	MVoteGranted bool
+	ctx          Ctx
 }
 
 type AppendEntriesArgs struct {
@@ -115,22 +118,33 @@ func CommandsInterpreter(commands []raftpb.Entry) []statepb.Command {
 	return result
 }
 
-func RaftMsgInterpreter(msg raftpb.Message) (MsgType, interface{}) {
+func CtxInterpreter(ctx []byte) interface{} {
+	if len(ctx) == 0 {
+		return nil
+	}
+	var a [8]byte
+	copy(a[:8], ctx)
+	return a
+}
+
+func RaftMsgInterpreter(msg raftpb.Message) (MsgType, interface{}, uint64, uint64, interface{}) {
 	switch msg.Type {
 	case raftpb.MsgApp:
-		return MsgApp, AppendEntriesArgs{From: msg.From, To: msg.To, MTerm: msg.Term, MPrevLogIndex: msg.Index, MPrevLogTerm: msg.LogTerm, MEntries: CommandsInterpreter(msg.Entries), MCommitIndex: msg.Commit}
+		return MsgApp, AppendEntriesArgs{From: msg.From, To: msg.To, MTerm: msg.Term, MPrevLogIndex: msg.Index, MPrevLogTerm: msg.LogTerm, MEntries: CommandsInterpreter(msg.Entries), MCommitIndex: msg.Commit}, msg.From, msg.To, nil
 	case raftpb.MsgAppResp:
-		return MsgAppResp, AppendEntriesReply{From: msg.From, To: msg.To, MTerm: msg.Term, MSuccess: !msg.Reject, MMatchIndex: msg.Index}
+		return MsgAppResp, AppendEntriesReply{From: msg.From, To: msg.To, MTerm: msg.Term, MSuccess: !msg.Reject, MMatchIndex: msg.Index}, msg.From, msg.To, nil
 	case raftpb.MsgVote:
-		return MsgVote, RequestVoteArgs{From: msg.From, To: msg.To, MTerm: msg.Term, MLastLogIndex: msg.Index, MLastLogTerm: msg.LogTerm}
+		return MsgVote, RequestVoteArgs{From: msg.From, To: msg.To, MTerm: msg.Term, MLastLogIndex: msg.Index, MLastLogTerm: msg.LogTerm}, msg.From, msg.To, nil
 	case raftpb.MsgVoteResp:
-		return MsgVoteResp, RequestVoteReply{From: msg.From, To: msg.To, MTerm: msg.Term, MVoteGranted: !msg.Reject}
+		return MsgVoteResp, RequestVoteReply{From: msg.From, To: msg.To, MTerm: msg.Term, MVoteGranted: !msg.Reject}, msg.From, msg.To, nil
 	case raftpb.MsgHeartbeat:
-		return MsgApp, AppendEntriesArgs{From: msg.From, To: msg.To, MTerm: msg.Term, MPrevLogIndex: 0, MPrevLogTerm: 0, MEntries: []statepb.Command{}, MCommitIndex: msg.Commit}
+		ctx := CtxInterpreter(msg.Context)
+		return MsgApp, AppendEntriesArgs{From: msg.From, To: msg.To, MTerm: msg.Term, MPrevLogIndex: 0, MPrevLogTerm: 0, MEntries: []statepb.Command{}, MCommitIndex: msg.Commit}, msg.From, msg.To, ctx
 	case raftpb.MsgHeartbeatResp:
-		return MsgAppResp, AppendEntriesReply{From: msg.From, To: msg.To, MTerm: msg.Term, MSuccess: !msg.Reject, MMatchIndex: 0}
+		ctx := CtxInterpreter(msg.Context)
+		return MsgAppResp, AppendEntriesReply{From: msg.From, To: msg.To, MTerm: msg.Term, MSuccess: !msg.Reject, MMatchIndex: 0}, msg.From, msg.To, ctx
 	}
-	return 0, nil
+	return 0, nil, 0, 0, nil
 }
 
 func PutRequestInterpreter(req *pb.PutRequest, data []byte, ID interface{}) statepb.Op {
@@ -166,7 +180,7 @@ func MsgInterpreter(msg Msg) (MsgType, interface{}, interface{}) {
 	if msg.Send {
 		if msg.Type == RaftRequest || msg.Type == RaftResp {
 			raftm := (msg.Msg).(RaftMsg)
-			t, m := RaftMsgInterpreter(raftm.Msg.(raftpb.Message))
+			t, m, _, _, _ := RaftMsgInterpreter(raftm.Msg.(raftpb.Message))
 			// if raftm.Req != nil {
 			// 	_, req := RaftMsgInterpreter(raftm.Req.(raftpb.Message))
 			// 	return t, m, req
@@ -180,8 +194,32 @@ func MsgInterpreter(msg Msg) (MsgType, interface{}, interface{}) {
 			return ClientRequest, ClientRequestInterpreter((msg.Msg).(ClientReq).Req, (msg.Msg).(ClientReq).ID), nil
 		} else {
 			raftm := (msg.Msg).(RaftMsg)
-			t, m := RaftMsgInterpreter(raftm.Msg.(raftpb.Message))
+			t, m, _, _, _ := RaftMsgInterpreter(raftm.Msg.(raftpb.Message))
 			return t, m, nil
+		}
+	}
+}
+
+func GetCtx(msg Msg) (uint64, uint64, interface{}) {
+	if msg.Send {
+		if msg.Type == RaftRequest || msg.Type == RaftResp {
+			raftm := (msg.Msg).(RaftMsg)
+			_, _, from, to, ctx := RaftMsgInterpreter(raftm.Msg.(raftpb.Message))
+			// if raftm.Req != nil {
+			// 	_, req := RaftMsgInterpreter(raftm.Req.(raftpb.Message))
+			// 	return t, m, req
+			// }
+			return from, to, ctx
+		} else {
+			return 0, 0, nil
+		}
+	} else {
+		if msg.Type == ClientRequest {
+			return 0, 0, nil
+		} else {
+			raftm := (msg.Msg).(RaftMsg)
+			_, _, from, to, ctx := RaftMsgInterpreter(raftm.Msg.(raftpb.Message))
+			return from, to, ctx
 		}
 	}
 }

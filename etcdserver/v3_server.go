@@ -118,6 +118,13 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 	messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.ClientRequest, Msg: messagepb.ClientReq{Req: r, ID: id}})
 
 	if !r.Serializable {
+		// if !s.r.IsLeader() {
+		// 	err = s.linearizableReadNotify(ctx)
+		// 	trace.Step("agreement among raft nodes before linearized reading")
+		// 	if err != nil {
+		// 		return nil, err
+		// 	}
+		// }
 		err = s.linearizableReadNotify(ctx)
 		trace.Step("agreement among raft nodes before linearized reading")
 		if err != nil {

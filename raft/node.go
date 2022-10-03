@@ -204,6 +204,8 @@ type Node interface {
 	// Stop performs any necessary termination of the Node.
 	Stop()
 
+	IsLeader() bool
+
 	SetMsgCh(mch chan messagepb.Msg)
 }
 
@@ -266,6 +268,8 @@ type node struct {
 
 	rn *RawNode
 }
+
+func (n *node) IsLeader() bool { return n.rn.raft.IsLeader() }
 
 func newNode(rn *RawNode) node {
 	return node{

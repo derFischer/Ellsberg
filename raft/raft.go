@@ -391,6 +391,8 @@ func newRaft(c *Config) *raft {
 
 func (r *raft) setMsgCh(mch chan messagepb.Msg) { r.SLmsg = mch }
 
+func (r *raft) IsLeader() bool { return r.state == StateLeader }
+
 func (r *raft) hasLeader() bool { return r.lead != None }
 
 func (r *raft) softState() *SoftState { return &SoftState{Lead: r.lead, RaftState: r.state} }
@@ -1017,20 +1019,23 @@ func stepLeader(r *raft, m pb.Message) error {
 		//
 		// TODO(tbg): I added a TODO in removeNode, it doesn't seem that the
 		// leader steps down when removing itself. I might be missing something.
-		if pr := r.prs.Progress[r.id]; pr != nil {
-			pr.RecentActive = true
-		}
-		if !r.prs.QuorumActive() {
-			r.logger.Warningf("%x stepped down to follower since quorum is not active", r.id)
-			r.becomeFollower(r.Term, None)
-		}
-		// Mark everyone (but ourselves) as inactive in preparation for the next
-		// CheckQuorum.
-		r.prs.Visit(func(id uint64, pr *tracker.Progress) {
-			if id != r.id {
-				pr.RecentActive = false
-			}
-		})
+
+		//hack: delete this part
+		// if pr := r.prs.Progress[r.id]; pr != nil {
+		// 	pr.RecentActive = true
+		// }
+		// if !r.prs.QuorumActive() {
+		// 	r.logger.Warningf("%x stepped down to follower since quorum is not active", r.id)
+		// 	r.becomeFollower(r.Term, None)
+		// }
+		// // Mark everyone (but ourselves) as inactive in preparation for the next
+		// // CheckQuorum.
+		// r.prs.Visit(func(id uint64, pr *tracker.Progress) {
+		// 	if id != r.id {
+		// 		pr.RecentActive = false
+		// 	}
+		// })
+
 		return nil
 	case pb.MsgProp:
 		// reque := new(etcdserverpb.InternalRaftRequest)

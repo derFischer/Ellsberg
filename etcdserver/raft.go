@@ -116,6 +116,8 @@ type raftNodeConfig struct {
 	transport rafthttp.Transporter
 }
 
+func (r *raftNode) IsLeader() bool { return r.raftNodeConfig.Node.IsLeader() }
+
 func newRaftNode(cfg raftNodeConfig) *raftNode {
 	var lg raft.Logger
 	if cfg.lg != nil {
