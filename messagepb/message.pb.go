@@ -6,18 +6,13 @@ import (
 	"go.etcd.io/etcd/v3/statepb"
 )
 
-type MsgType int32
+type MsgType int8
 
 const (
 	ClientRequest MsgType = 1
 	ClientResp    MsgType = 2
 	RaftRequest   MsgType = 3
 	RaftResp      MsgType = 4
-
-	MsgApp      MsgType = 5
-	MsgAppResp  MsgType = 6
-	MsgVote     MsgType = 7
-	MsgVoteResp MsgType = 8
 )
 
 // type EntryType int32
@@ -42,6 +37,48 @@ const (
 // 	Value []byte
 // 	Data  []byte
 // }
+
+type MessageType int8
+
+const (
+	//raft messages
+	MsgApp      MessageType = 1
+	MsgAppResp  MessageType = 2
+	MsgVote     MessageType = 3
+	MsgVoteResp MessageType = 4
+
+	//client messages
+	ClientNormal     MessageType = 5
+	ClientKVPut      MessageType = 6
+	ClientKVRO       MessageType = 7
+	ClientConfChange MessageType = 8
+
+	ClientNormalResp MessageType = 9
+	ClientROResp     MessageType = 10
+)
+
+type Message struct {
+	Type MessageType
+
+	//raft message
+	From        uint64
+	To          uint64
+	Mterm       uint64
+	Index       uint64
+	IndexTerm   uint64
+	Success     bool
+	MEntries    []statepb.Command
+	CommitIndex uint64
+	MatchIndex  uint64
+	ReqTerm     uint64
+
+	//client messages
+	ReqID interface{}
+	Key   []byte
+	Value []byte
+	Data  []byte
+}
+
 type Ctx interface{}
 
 type RequestVoteArgs struct {
@@ -50,7 +87,6 @@ type RequestVoteArgs struct {
 	MTerm         uint64
 	MLastLogIndex uint64
 	MLastLogTerm  uint64
-	ctx           Ctx
 }
 
 type RequestVoteReply struct {
@@ -58,7 +94,6 @@ type RequestVoteReply struct {
 	To           uint64
 	MTerm        uint64
 	MVoteGranted bool
-	ctx          Ctx
 }
 
 type AppendEntriesArgs struct {
@@ -127,34 +162,71 @@ func CtxInterpreter(ctx []byte) interface{} {
 	return a
 }
 
-func RaftMsgInterpreter(msg raftpb.Message) (MsgType, interface{}, uint64, uint64, interface{}) {
+func RaftMsgInterpreter(message RaftMsg, send bool) (Message, Ctx) {
+	// fmt.Printf("interprete raft message: %+v\n", message)
+	msg := message.Msg.(raftpb.Message)
 	switch msg.Type {
 	case raftpb.MsgApp:
-		return MsgApp, AppendEntriesArgs{From: msg.From, To: msg.To, MTerm: msg.Term, MPrevLogIndex: msg.Index, MPrevLogTerm: msg.LogTerm, MEntries: CommandsInterpreter(msg.Entries), MCommitIndex: msg.Commit}, msg.From, msg.To, nil
+		return Message{Type: MsgApp, From: msg.From, To: msg.To, Mterm: msg.Term, Index: msg.Index, IndexTerm: msg.LogTerm, MEntries: CommandsInterpreter(msg.Entries), CommitIndex: msg.Commit}, nil
 	case raftpb.MsgAppResp:
-		return MsgAppResp, AppendEntriesReply{From: msg.From, To: msg.To, MTerm: msg.Term, MSuccess: !msg.Reject, MMatchIndex: msg.Index}, msg.From, msg.To, nil
+		if send {
+			req := message.Req.(raftpb.Message)
+			return Message{Type: MsgAppResp, From: msg.From, To: msg.To, Mterm: msg.Term, Success: !msg.Reject, MatchIndex: msg.Index, Index: req.Index, IndexTerm: req.LogTerm, MEntries: CommandsInterpreter(req.Entries), CommitIndex: req.Commit, ReqTerm: req.Term}, nil
+		} else {
+			return Message{Type: MsgAppResp, From: msg.From, To: msg.To, Mterm: msg.Term, Success: !msg.Reject, MatchIndex: msg.Index}, nil
+		}
 	case raftpb.MsgVote:
-		return MsgVote, RequestVoteArgs{From: msg.From, To: msg.To, MTerm: msg.Term, MLastLogIndex: msg.Index, MLastLogTerm: msg.LogTerm}, msg.From, msg.To, nil
+		return Message{Type: MsgVote, From: msg.From, To: msg.To, Mterm: msg.Term, Index: msg.Index, IndexTerm: msg.LogTerm}, nil
 	case raftpb.MsgVoteResp:
-		return MsgVoteResp, RequestVoteReply{From: msg.From, To: msg.To, MTerm: msg.Term, MVoteGranted: !msg.Reject}, msg.From, msg.To, nil
+		if send {
+			req := message.Req.(raftpb.Message)
+			return Message{Type: MsgVoteResp, From: msg.From, To: msg.To, Mterm: msg.Term, Success: !msg.Reject, Index: req.Index, IndexTerm: req.LogTerm, ReqTerm: req.Term}, nil
+		} else {
+			return Message{Type: MsgVoteResp, From: msg.From, To: msg.To, Mterm: msg.Term, Success: !msg.Reject}, nil
+		}
 	case raftpb.MsgHeartbeat:
 		ctx := CtxInterpreter(msg.Context)
-		return MsgApp, AppendEntriesArgs{From: msg.From, To: msg.To, MTerm: msg.Term, MPrevLogIndex: 0, MPrevLogTerm: 0, MEntries: []statepb.Command{}, MCommitIndex: msg.Commit}, msg.From, msg.To, ctx
+		return Message{Type: MsgApp, From: msg.From, To: msg.To, Mterm: msg.Term, Index: 0, IndexTerm: 0, MEntries: []statepb.Command{}, CommitIndex: msg.Commit}, ctx
 	case raftpb.MsgHeartbeatResp:
-		ctx := CtxInterpreter(msg.Context)
-		return MsgAppResp, AppendEntriesReply{From: msg.From, To: msg.To, MTerm: msg.Term, MSuccess: !msg.Reject, MMatchIndex: 0}, msg.From, msg.To, ctx
+		if send {
+			ctx := CtxInterpreter(msg.Context)
+			req := message.Req.(raftpb.Message)
+			return Message{Type: MsgAppResp, From: msg.From, To: msg.To, Mterm: msg.Term, Success: !msg.Reject, MatchIndex: 0, Index: 0, IndexTerm: 0, MEntries: []statepb.Command{}, CommitIndex: req.Commit, ReqTerm: req.Term}, ctx
+		} else {
+			ctx := CtxInterpreter(msg.Context)
+			return Message{Type: MsgAppResp, From: msg.From, To: msg.To, Mterm: msg.Term, Success: !msg.Reject, MatchIndex: 0}, ctx
+		}
 	}
-	return 0, nil, 0, 0, nil
+	return Message{}, nil
 }
 
-func PutRequestInterpreter(req *pb.PutRequest, data []byte, ID interface{}) statepb.Op {
-	return statepb.Op{Type: statepb.EntryKVPut, Key: req.Key, Value: req.Value, Data: data, ReqID: ID}
+// func RaftMsgInterpreter(msg raftpb.Message) (MsgType, interface{}, uint64, uint64, interface{}) {
+// 	switch msg.Type {
+// 	case raftpb.MsgApp:
+// 		return MsgApp, AppendEntriesArgs{From: msg.From, To: msg.To, MTerm: msg.Term, MPrevLogIndex: msg.Index, MPrevLogTerm: msg.LogTerm, MEntries: CommandsInterpreter(msg.Entries), MCommitIndex: msg.Commit}, msg.From, msg.To, nil
+// 	case raftpb.MsgAppResp:
+// 		return MsgAppResp, AppendEntriesReply{From: msg.From, To: msg.To, MTerm: msg.Term, MSuccess: !msg.Reject, MMatchIndex: msg.Index}, msg.From, msg.To, nil
+// 	case raftpb.MsgVote:
+// 		return MsgVote, RequestVoteArgs{From: msg.From, To: msg.To, MTerm: msg.Term, MLastLogIndex: msg.Index, MLastLogTerm: msg.LogTerm}, msg.From, msg.To, nil
+// 	case raftpb.MsgVoteResp:
+// 		return MsgVoteResp, RequestVoteReply{From: msg.From, To: msg.To, MTerm: msg.Term, MVoteGranted: !msg.Reject}, msg.From, msg.To, nil
+// 	case raftpb.MsgHeartbeat:
+// 		ctx := CtxInterpreter(msg.Context)
+// 		return MsgApp, AppendEntriesArgs{From: msg.From, To: msg.To, MTerm: msg.Term, MPrevLogIndex: 0, MPrevLogTerm: 0, MEntries: []statepb.Command{}, MCommitIndex: msg.Commit}, msg.From, msg.To, ctx
+// 	case raftpb.MsgHeartbeatResp:
+// 		ctx := CtxInterpreter(msg.Context)
+// 		return MsgAppResp, AppendEntriesReply{From: msg.From, To: msg.To, MTerm: msg.Term, MSuccess: !msg.Reject, MMatchIndex: 0}, msg.From, msg.To, ctx
+// 	}
+// 	return 0, nil, 0, 0, nil
+// }
+func PutRequestInterpreter(req *pb.PutRequest, data []byte, ID interface{}) Message {
+	return Message{Type: ClientKVPut, Key: req.Key, Value: req.Value, Data: data, ReqID: ID}
 }
 
-func ClientRequestInterpreter(req interface{}, ID interface{}) statepb.Op {
+func ClientRequestInterpreter(req interface{}, ID interface{}) Message {
 	switch req.(type) {
 	case *pb.RangeRequest:
-		return statepb.Op{Type: statepb.EntryKVRO, Key: req.(*pb.RangeRequest).Key, ReqID: ID}
+		return Message{Type: ClientKVRO, Key: req.(*pb.RangeRequest).Key, ReqID: ID}
 	default:
 		req := pb.InternalRaftRequest(req.(pb.InternalRaftRequest))
 		data, _ := req.Marshal()
@@ -162,67 +234,88 @@ func ClientRequestInterpreter(req interface{}, ID interface{}) statepb.Op {
 		if p != nil {
 			return PutRequestInterpreter(p, data, ID)
 		}
-		return statepb.Op{Type: statepb.EntryNormal, Data: data, ReqID: ID}
+		return Message{Type: ClientNormal, Data: data, ReqID: ID}
 	}
 }
 
-func ClientResponseInterpreter(ID interface{}, resp interface{}) Resp {
+// func PutRequestInterpreter(req *pb.PutRequest, data []byte, ID interface{}) statepb.Op {
+// 	return statepb.Op{Type: statepb.EntryKVPut, Key: req.Key, Value: req.Value, Data: data, ReqID: ID}
+// }
+
+// func ClientRequestInterpreter(req interface{}, ID interface{}) statepb.Op {
+// 	switch req.(type) {
+// 	case *pb.RangeRequest:
+// 		return statepb.Op{Type: statepb.EntryKVRO, Key: req.(*pb.RangeRequest).Key, ReqID: ID}
+// 	default:
+// 		req := pb.InternalRaftRequest(req.(pb.InternalRaftRequest))
+// 		data, _ := req.Marshal()
+// 		p := req.Put
+// 		if p != nil {
+// 			return PutRequestInterpreter(p, data, ID)
+// 		}
+// 		return statepb.Op{Type: statepb.EntryNormal, Data: data, ReqID: ID}
+// 	}
+// }
+
+func ClientResponseInterpreter(ID interface{}, resp interface{}) Message {
 	// resp = resp.(pb.InternalRaftRequest)
 	switch resp.(type) {
 	case *pb.RangeResponse:
-		return Resp{Type: ReadResp, ID: ID, Key: resp.(*pb.RangeResponse).Kvs[0].Key, Value: resp.(*pb.RangeResponse).Kvs[0].Value}
+		return Message{Type: ClientROResp, ReqID: ID, Key: resp.(*pb.RangeResponse).Kvs[0].Key, Value: resp.(*pb.RangeResponse).Kvs[0].Value}
 	default:
-		return Resp{Type: NormalResp, ID: ID}
+		return Message{Type: ClientNormalResp, ReqID: ID}
 	}
 }
 
-func MsgInterpreter(msg Msg) (MsgType, interface{}, interface{}) {
+// func ClientResponseInterpreter(ID interface{}, resp interface{}) Resp {
+// 	// resp = resp.(pb.InternalRaftRequest)
+// 	switch resp.(type) {
+// 	case *pb.RangeResponse:
+// 		return Resp{Type: ReadResp, ID: ID, Key: resp.(*pb.RangeResponse).Kvs[0].Key, Value: resp.(*pb.RangeResponse).Kvs[0].Value}
+// 	default:
+// 		return Resp{Type: NormalResp, ID: ID}
+// 	}
+// }
+
+func MsgInterpreter(msg Msg) (Message, Ctx) {
 	if msg.Send {
-		if msg.Type == RaftRequest || msg.Type == RaftResp {
-			raftm := (msg.Msg).(RaftMsg)
-			t, m, _, _, _ := RaftMsgInterpreter(raftm.Msg.(raftpb.Message))
-			// if raftm.Req != nil {
-			// 	_, req := RaftMsgInterpreter(raftm.Req.(raftpb.Message))
-			// 	return t, m, req
-			// }
-			return t, m, raftm.Req
+		if msg.Type == ClientResp {
+			return ClientResponseInterpreter((msg.Msg).(ClientReply).ID, (msg.Msg).(ClientReply).Reply), nil
 		} else {
-			return ClientResp, ClientResponseInterpreter((msg.Msg).(ClientReply).ID, (msg.Msg).(ClientReply).Reply), nil
+			return RaftMsgInterpreter((msg.Msg).(RaftMsg), true)
 		}
 	} else {
 		if msg.Type == ClientRequest {
-			return ClientRequest, ClientRequestInterpreter((msg.Msg).(ClientReq).Req, (msg.Msg).(ClientReq).ID), nil
+			return ClientRequestInterpreter((msg.Msg).(ClientReq).Req, (msg.Msg).(ClientReq).ID), nil
 		} else {
-			raftm := (msg.Msg).(RaftMsg)
-			t, m, _, _, _ := RaftMsgInterpreter(raftm.Msg.(raftpb.Message))
-			return t, m, nil
+			return RaftMsgInterpreter((msg.Msg).(RaftMsg), false)
 		}
 	}
 }
 
-func GetCtx(msg Msg) (uint64, uint64, interface{}) {
-	if msg.Send {
-		if msg.Type == RaftRequest || msg.Type == RaftResp {
-			raftm := (msg.Msg).(RaftMsg)
-			_, _, from, to, ctx := RaftMsgInterpreter(raftm.Msg.(raftpb.Message))
-			// if raftm.Req != nil {
-			// 	_, req := RaftMsgInterpreter(raftm.Req.(raftpb.Message))
-			// 	return t, m, req
-			// }
-			return from, to, ctx
-		} else {
-			return 0, 0, nil
-		}
-	} else {
-		if msg.Type == ClientRequest {
-			return 0, 0, nil
-		} else {
-			raftm := (msg.Msg).(RaftMsg)
-			_, _, from, to, ctx := RaftMsgInterpreter(raftm.Msg.(raftpb.Message))
-			return from, to, ctx
-		}
-	}
-}
+// func GetCtx(msg Msg) (uint64, uint64, interface{}) {
+// 	if msg.Send {
+// 		if msg.Type == RaftRequest || msg.Type == RaftResp {
+// 			raftm := (msg.Msg).(RaftMsg)
+// 			_, _, from, to, ctx := RaftMsgInterpreter(raftm.Msg.(raftpb.Message))
+// 			// if raftm.Req != nil {
+// 			// 	_, req := RaftMsgInterpreter(raftm.Req.(raftpb.Message))
+// 			// 	return t, m, req
+// 			// }
+// 			return from, to, ctx
+// 		} else {
+// 			return 0, 0, nil
+// 		}
+// 	} else {
+// 		if msg.Type == ClientRequest {
+// 			return 0, 0, nil
+// 		} else {
+// 			raftm := (msg.Msg).(RaftMsg)
+// 			_, _, from, to, ctx := RaftMsgInterpreter(raftm.Msg.(raftpb.Message))
+// 			return from, to, ctx
+// 		}
+// 	}
+// }
 
 type ClientReply struct {
 	Reply interface{}

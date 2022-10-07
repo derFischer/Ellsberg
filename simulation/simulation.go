@@ -84,17 +84,17 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	return sl
 }
 
-func (s *Simulation) sendMsg(msg messagepb.Msg) {
-	_, _, ctx := messagepb.GetCtx(msg)
+func (s *Simulation) sendMsg(message messagepb.Msg) {
+	// fmt.Printf("sending out message: %+v\n", message)
+	msg, ctx := messagepb.MsgInterpreter(message)
 	s.InitializeCtx(ctx)
 
 	connected_peers := []uint64{}
-	t, m, _ := messagepb.MsgInterpreter(msg)
-	ROResp := (t == messagepb.ClientResp) && (m.(messagepb.Resp).Type == messagepb.ReadResp)
+	ROResp := (msg.Type == messagepb.ClientROResp)
 	if ROResp {
-		found, entry := s.searchInROReq(m.(messagepb.Resp).ID)
+		found, entry := s.searchInROReq(msg.ReqID)
 		if !found {
-			log.Fatalf("haven't received the client req for response %+v before\n", m.(messagepb.Resp))
+			log.Fatalf("haven't received the client req for response %+v before\n", msg)
 		}
 		for i := 0; i < len(entry.Ctxs); i++ {
 			ctx := entry.Ctxs[i]
@@ -110,45 +110,35 @@ func (s *Simulation) sendMsg(msg messagepb.Msg) {
 	s.CheckMsg(msg, connected_peers)
 }
 
-func (s *Simulation) receiveMsg(msg messagepb.Msg) {
-	from, _, ctx := messagepb.GetCtx(msg)
-	s.ConnectionAlive(from, ctx)
+func (s *Simulation) receiveMsg(message messagepb.Msg) {
+	msg, ctx := messagepb.MsgInterpreter(message)
+	s.ConnectionAlive(msg.From, ctx)
 
-	t, m, _ := messagepb.MsgInterpreter(msg)
-	if t == messagepb.ClientRequest {
-		if m.(statepb.Op).Type == statepb.EntryKVRO {
-			s.ROReq = append(s.ROReq, ROEntry{ReqID: m.(statepb.Op).ReqID})
-		}
+	if msg.Type == messagepb.ClientKVRO {
+		s.ROReq = append(s.ROReq, ROEntry{ReqID: msg.ReqID})
 	}
 	s.AddPendings(msg)
 }
 
-func (s *Simulation) CheckMsg(msg messagepb.Msg, connected_peers []uint64) {
+func (s *Simulation) CheckMsg(msg messagepb.Message, connected_peers []uint64) {
 	tmp_state := make([]partialOrder.Path, 0)
 	for i := 0; i < len(s.States); i++ {
 		paths := partialOrder.ExplorePaths(s.States[i].End_s, s.States[i].Remaining_pending, msg, connected_peers)
-		// fmt.Printf("paths: %+v\n\n\n", paths)
 		tmp_state = append(tmp_state, paths...)
 	}
 	if len(tmp_state) == 0 {
-		fmt.Printf("No valid states for this message. The message: %+v\n", msg)
-		// s.dump()
-		// s.dump()
-		// fmt.Printf("all possbile states: %+v\n msg is :%+v\n", s.States, msg)
+		fmt.Printf("No valid states for this message. The message: %+v\n ", msg)
+		s.dump()
 		log.Fatalf("No valid states for this message.")
 	}
-	// fmt.Printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!after check, current states: %+v\n\n\n", tmp_state)
 	s.States = tmp_state
-	// fmt.Printf("all possbile states: %+v\n", len(s.States))
-	// s.dump()
-	// fmt.Printf("states size is %+v\n\n", len(s.States))
 }
 
 func (s *Simulation) InitializeCtx(ctx messagepb.Ctx) {
 	if ctx == nil {
 		return
 	}
-	fmt.Printf("initialize ctx: %+v, current pending ro reqs: %+v\n", ctx, s.ROReq)
+	// fmt.Printf("initialize ctx: %+v, current pending ro reqs: %+v\n", ctx, s.ROReq)
 	found := s.searchConnection(ctx, true, len(s.ROReq))
 	if found {
 		return
@@ -163,7 +153,7 @@ func (s *Simulation) ConnectionAlive(id uint64, ctx messagepb.Ctx) {
 	if ctx == nil {
 		return
 	}
-	fmt.Printf("connection alive: %+v\n", ctx)
+	// fmt.Printf("connection alive: %+v\n", ctx)
 	found := s.searchConnection(ctx, false, 0)
 	if found {
 		connection := s.Connections[ctx]
@@ -173,7 +163,7 @@ func (s *Simulation) ConnectionAlive(id uint64, ctx messagepb.Ctx) {
 	}
 }
 
-func (s *Simulation) AddPendings(msg messagepb.Msg) {
+func (s *Simulation) AddPendings(msg messagepb.Message) {
 	for i := 0; i < len(s.States); i++ {
 		if partialOrder.Drop(msg, s.States[i].End_s) {
 			continue

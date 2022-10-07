@@ -195,7 +195,7 @@ func (s *State) LogGC() {
 	}
 }
 
-func (s *State) SearchGet(r messagepb.Resp) bool {
+func (s *State) SearchGet(r messagepb.Message) bool {
 	last_commit_value_match := true
 	for i := s.GetFirstCommandIndex(); i <= s.CommitIndex; i++ {
 		command := s.GetCommand(i)

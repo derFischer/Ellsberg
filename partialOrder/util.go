@@ -38,73 +38,71 @@ func CopyState(s state.State) state.State {
 	return r
 }
 
-func Apply(st state.State, msg messagepb.Msg) (state.State, interface{}) {
-	t, m, _ := messagepb.MsgInterpreter(msg)
+func Apply(st state.State, msg messagepb.Message) (state.State, messagepb.Message) {
 	s := CopyState(st)
 	// defer fmt.Printf("after apply, the size of s log: %+v\n", len(s.Log))
-	switch t {
+	switch msg.Type {
 	case messagepb.MsgApp:
-		reply := s.AppendEntryRequestHandler(m.(messagepb.AppendEntriesArgs))
+		reply := s.AppendEntryRequestHandler(messagepb.AppendEntriesArgs{From: msg.From, To: msg.To, MTerm: msg.Mterm, MPrevLogIndex: msg.Index, MPrevLogTerm: msg.IndexTerm, MEntries: msg.MEntries, MCommitIndex: msg.CommitIndex})
 		s.Truncate()
-		return s, reply
+		return s, messagepb.Message{Type: messagepb.MsgAppResp, From: reply.From, To: reply.To, Mterm: reply.MTerm, Success: reply.MSuccess, MatchIndex: reply.MMatchIndex}
 	case messagepb.MsgAppResp:
-		s.AppendEntryReplyHandler(m.(messagepb.AppendEntriesReply))
+		s.AppendEntryReplyHandler(messagepb.AppendEntriesReply{From: msg.From, To: msg.To, MTerm: msg.Mterm, MSuccess: msg.Success, MMatchIndex: msg.MatchIndex})
 		s.Truncate()
-		return s, nil
+		return s, messagepb.Message{}
 	case messagepb.MsgVote:
-		reply := s.RequestVoteRequestHandler(m.(messagepb.RequestVoteArgs))
+		reply := s.RequestVoteRequestHandler(messagepb.RequestVoteArgs{From: msg.From, To: msg.To, MTerm: msg.Mterm, MLastLogIndex: msg.Index, MLastLogTerm: msg.IndexTerm})
 		s.Truncate()
-		return s, reply
+		return s, messagepb.Message{Type: messagepb.MsgVoteResp, From: reply.From, To: reply.To, Mterm: reply.MTerm, Success: reply.MVoteGranted}
 	case messagepb.MsgVoteResp:
-		s.RequestVoteReplyHandler(m.(messagepb.RequestVoteReply))
+		s.RequestVoteReplyHandler(messagepb.RequestVoteReply{From: msg.From, To: msg.To, MTerm: msg.Mterm, MVoteGranted: msg.Success})
 		s.Truncate()
-		return s, nil
-	case messagepb.ClientRequest:
-		s.ClientRequestHandler(m.(statepb.Op))
+		return s, messagepb.Message{}
+	case messagepb.ClientNormal, messagepb.ClientKVPut, messagepb.ClientConfChange:
+		t := statepb.EntryUnknown
+		if msg.Type == messagepb.ClientKVPut {
+			t = statepb.EntryKVPut
+		} else if msg.Type == messagepb.ClientNormal {
+			t = statepb.EntryNormal
+		} else if msg.Type == messagepb.ClientConfChange {
+			t = statepb.EntryConfChange
+		}
+		s.ClientRequestHandler(statepb.Op{ReqID: msg.ReqID, Type: t, Key: msg.Key, Value: msg.Value, Data: msg.Data})
 		s.Truncate()
-		return s, nil
+		return s, messagepb.Message{}
 	}
-	return state.State{}, nil
+	return state.State{}, messagepb.Message{}
 }
 
-func MsgAppInference(msg messagepb.AppendEntriesArgs) state.PartialState {
+func MsgAppInference(msg messagepb.Message) state.PartialState {
 	log := make([]statepb.Command, 0)
-	log = append(log, statepb.Command{CommandIndex: msg.MPrevLogIndex, CommandTerm: msg.MPrevLogTerm, Command: statepb.Op{Type: statepb.EntryUnknown}})
+	log = append(log, statepb.Command{CommandIndex: msg.Index, CommandTerm: msg.IndexTerm, Command: statepb.Op{Type: statepb.EntryUnknown}})
 	log = append(log, msg.MEntries...)
-	// for i := 0; i < len(msg.MEntries); i++ {
-	// 	en := msg.MEntries[i]
-	// 	log = append(log, statepb.Command{CommandIndex: en.CommandIndex, CommandTerm: en.CommandTerm, Command: statepb.Op{ReqID: en.Command.ReqID, Type: en.Command.Type), Key: en.Command.Key, Value: en.Command.Value, Data: en.Command.Data}})
-	// }
-	return state.PartialState{State: statepb.Leader, CurrentTerm: msg.MTerm, VotedFor: statepb.Unknown, Log: log, CommitIndex: msg.MCommitIndex}
+	return state.PartialState{State: statepb.Leader, CurrentTerm: msg.Mterm, VotedFor: statepb.Unknown, Log: log, CommitIndex: msg.CommitIndex}
 }
 
-func MsgVoteInference(msg messagepb.RequestVoteArgs) state.PartialState {
+func MsgVoteInference(msg messagepb.Message) state.PartialState {
 	log := make([]statepb.Command, 0)
-	log = append(log, statepb.Command{CommandIndex: msg.MLastLogIndex, CommandTerm: msg.MLastLogTerm})
-	return state.PartialState{State: statepb.Candidate, CurrentTerm: msg.MTerm, VotedFor: msg.From, Log: log, CommitIndex: statepb.Unknown}
+	log = append(log, statepb.Command{CommandIndex: msg.Index, CommandTerm: msg.IndexTerm})
+	return state.PartialState{State: statepb.Candidate, CurrentTerm: msg.Mterm, VotedFor: msg.From, Log: log, CommitIndex: statepb.Unknown}
 }
 
-// func MsgVoteRespInference(msg messagepb.RequestVoteReply, req messagepb.RequestVoteArgs) PartialState {
-// 	if msg.MVoteGranted {
-
-// 	}
-// }
-
-func Inference(msg messagepb.Msg) (interface{}, interface{}) {
-	t, m, req := messagepb.MsgInterpreter(msg)
-	switch t {
+func Inference(msg messagepb.Message) (interface{}, messagepb.Message) {
+	switch msg.Type {
 	case messagepb.MsgApp:
-		return MsgAppInference(m.(messagepb.AppendEntriesArgs)), nil
+		return MsgAppInference(msg), messagepb.Message{}
 	case messagepb.MsgAppResp:
-		return m, req
+		return messagepb.Message{Type: messagepb.MsgAppResp, From: msg.From, To: msg.To, Mterm: msg.Mterm, Success: msg.Success, MatchIndex: msg.MatchIndex}, messagepb.Message{Type: messagepb.MsgApp, From: msg.To, To: msg.From, Mterm: msg.ReqTerm, Index: msg.Index, IndexTerm: msg.IndexTerm, MEntries: msg.MEntries, CommitIndex: msg.CommitIndex}
 	case messagepb.MsgVote:
-		return MsgVoteInference(m.(messagepb.RequestVoteArgs)), nil
+		return MsgVoteInference(msg), messagepb.Message{}
 	case messagepb.MsgVoteResp:
-		return m, req
-	case messagepb.ClientResp:
-		return m, nil
+		return messagepb.Message{Type: messagepb.MsgVoteResp, From: msg.From, To: msg.To, Mterm: msg.Mterm, Success: msg.Success}, messagepb.Message{Type: messagepb.MsgVote, From: msg.To, To: msg.From, Mterm: msg.ReqTerm, Index: msg.Index, IndexTerm: msg.IndexTerm}
+	case messagepb.ClientNormalResp:
+		return msg, messagepb.Message{}
+	case messagepb.ClientROResp:
+		return msg, messagepb.Message{}
 	default:
-		return nil, nil
+		return nil, messagepb.Message{}
 	}
 }
 
@@ -212,12 +210,11 @@ func CommitIndexMatch(s1 state.State, s2 state.PartialState) bool {
 	return s1.CommitIndex >= s2.CommitIndex
 }
 
-func ParitialStateEnabled(ps state.PartialState, from state.State, msg messagepb.Msg) bool {
-	s, _ := Apply(from, msg)
-	// //fmt.Printf("!!!!!!!!!!!!!!!ENABLED FUNCTION, STATE: %+v\n, MESSAGE: %+v\n", ps, msg)
-	if s.CurrentTerm > ps.CurrentTerm {
+func ParitialStateEnabled(ps state.PartialState, from state.State, msg messagepb.Message) bool {
+	if msg.Mterm > ps.CurrentTerm {
 		return false
 	}
+	s, _ := Apply(from, msg)
 	if !LogMatch(s, ps.Log, from.CommitIndex, false) {
 		return false
 	}

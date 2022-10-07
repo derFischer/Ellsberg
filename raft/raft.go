@@ -439,7 +439,11 @@ func (r *raft) send(args interface{}, m pb.Message) {
 		}
 	}
 
-	messagepb.Sending(r.SLmsg, messagepb.Msg{Send: true, Type: messagepb.RaftResp, Msg: messagepb.RaftMsg{Msg: m, Req: args}})
+	if args == nil {
+		messagepb.Sending(r.SLmsg, messagepb.Msg{Send: true, Type: messagepb.RaftRequest, Msg: messagepb.RaftMsg{Msg: m, Req: args}})
+	} else {
+		messagepb.Sending(r.SLmsg, messagepb.Msg{Send: true, Type: messagepb.RaftResp, Msg: messagepb.RaftMsg{Msg: m, Req: args}})
+	}
 	r.msgs = append(r.msgs, m)
 }
 
