@@ -1,6 +1,7 @@
 package partialOrder
 
 import (
+	"log"
 	"math"
 	"reflect"
 
@@ -40,38 +41,32 @@ func CopyState(s state.State) state.State {
 
 func Apply(st state.State, msg messagepb.Message) (state.State, messagepb.Message) {
 	s := CopyState(st)
+	reply := messagepb.Message{}
 	// defer fmt.Printf("after apply, the size of s log: %+v\n", len(s.Log))
 	switch msg.Type {
 	case messagepb.MsgApp:
-		reply := s.AppendEntryRequestHandler(messagepb.AppendEntriesArgs{From: msg.From, To: msg.To, MTerm: msg.Mterm, MPrevLogIndex: msg.Index, MPrevLogTerm: msg.IndexTerm, MEntries: msg.MEntries, MCommitIndex: msg.CommitIndex})
-		s.Truncate()
-		return s, messagepb.Message{Type: messagepb.MsgAppResp, From: reply.From, To: reply.To, Mterm: reply.MTerm, Success: reply.MSuccess, MatchIndex: reply.MMatchIndex}
+		reply = s.AppendEntryRequestHandler(msg)
 	case messagepb.MsgAppResp:
-		s.AppendEntryReplyHandler(messagepb.AppendEntriesReply{From: msg.From, To: msg.To, MTerm: msg.Mterm, MSuccess: msg.Success, MMatchIndex: msg.MatchIndex})
-		s.Truncate()
-		return s, messagepb.Message{}
+		s.AppendEntryReplyHandler(msg)
 	case messagepb.MsgVote:
-		reply := s.RequestVoteRequestHandler(messagepb.RequestVoteArgs{From: msg.From, To: msg.To, MTerm: msg.Mterm, MLastLogIndex: msg.Index, MLastLogTerm: msg.IndexTerm})
-		s.Truncate()
-		return s, messagepb.Message{Type: messagepb.MsgVoteResp, From: reply.From, To: reply.To, Mterm: reply.MTerm, Success: reply.MVoteGranted}
+		reply = s.RequestVoteRequestHandler(msg)
 	case messagepb.MsgVoteResp:
-		s.RequestVoteReplyHandler(messagepb.RequestVoteReply{From: msg.From, To: msg.To, MTerm: msg.Mterm, MVoteGranted: msg.Success})
-		s.Truncate()
-		return s, messagepb.Message{}
+		s.RequestVoteReplyHandler(msg)
+	case messagepb.MsgReadIndexResp:
+		s.ReadIndexReplyHandler(msg)
+	case messagepb.CheckCommitIndex:
+		s.UpdateCommitIndex()
+	case messagepb.CheckLeader:
+		s.CheckLeader()
+	case messagepb.Timeout:
+		s.BecomeCandidate()
 	case messagepb.ClientNormal, messagepb.ClientKVPut, messagepb.ClientConfChange:
-		t := statepb.EntryUnknown
-		if msg.Type == messagepb.ClientKVPut {
-			t = statepb.EntryKVPut
-		} else if msg.Type == messagepb.ClientNormal {
-			t = statepb.EntryNormal
-		} else if msg.Type == messagepb.ClientConfChange {
-			t = statepb.EntryConfChange
-		}
-		s.ClientRequestHandler(statepb.Op{ReqID: msg.ReqID, Type: t, Key: msg.Key, Value: msg.Value, Data: msg.Data})
-		s.Truncate()
-		return s, messagepb.Message{}
+		s.ClientRequestHandler(msg)
 	}
-	return state.State{}, messagepb.Message{}
+	if len(s.Log) == 0 {
+		log.Fatalf("ERROR! length of the log becomes 0! message: %+v\n", msg)
+	}
+	return s, reply
 }
 
 func MsgAppInference(msg messagepb.Message) state.PartialState {
@@ -207,27 +202,30 @@ func CommitIndexMatch(s1 state.State, s2 state.PartialState) bool {
 	if s2.CommitIndex == statepb.Unknown {
 		return true
 	}
-	return s1.CommitIndex >= s2.CommitIndex
+	return s1.CommitIndex == s2.CommitIndex
 }
 
-func ParitialStateEnabled(ps state.PartialState, from state.State, msg messagepb.Message) bool {
+func ParitialStateEnabled(ps state.PartialState, from state.State, msg messagepb.Message) (bool, bool, state.State) {
 	if msg.Mterm > ps.CurrentTerm {
-		return false
+		return false, false, state.State{}
 	}
 	s, _ := Apply(from, msg)
+	if s.CurrentTerm > ps.CurrentTerm && ps.CurrentTerm != statepb.Unknown {
+		return false, true, s
+	}
 	if !LogMatch(s, ps.Log, from.CommitIndex, false) {
-		return false
+		return false, true, s
 	}
 	if s.CurrentTerm == ps.CurrentTerm && s.VotedFor != ps.VotedFor && ps.VotedFor != statepb.Unknown {
-		return false
+		return false, true, s
 	}
 	if s.CurrentTerm == ps.CurrentTerm && !StateEnables(ps.State, s.State) {
-		return false
+		return false, true, s
 	}
 	if s.CommitIndex > ps.CommitIndex {
-		return false
+		return false, true, s
 	}
-	return true
+	return true, true, s
 }
 
 func StateEnables(s1 statepb.StateType, s2 statepb.StateType) bool {
@@ -243,53 +241,119 @@ func StateEnables(s1 statepb.StateType, s2 statepb.StateType) bool {
 func PartialStateMatched(ps state.PartialState, st state.State) (state.State, bool) {
 	s := CopyState(st)
 	if ps.State == statepb.Candidate {
-		if ps.CurrentTerm > s.CurrentTerm {
-			if LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps) {
-				s.Candidate(ps.CurrentTerm)
-				return s, true
-			}
-			return s, false
-		} else if ps.CurrentTerm == s.CurrentTerm {
-			return s, StateMatch(s, ps) && VotedForMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps)
-		} else {
-			return s, false
-		}
+		return s, StateMatch(s, ps) && TermMatch(s, ps) && VotedForMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps)
+		// if ps.CurrentTerm > s.CurrentTerm {
+		// 	if LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps) {
+		// 		s.Candidate(ps.CurrentTerm)
+		// 		return s, true
+		// 	}
+		// 	return s, false
+		// } else if ps.CurrentTerm == s.CurrentTerm {
+		// 	return s, StateMatch(s, ps) && VotedForMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps)
+		// } else {
+		// 	return s, false
+		// }
 	} else if ps.State == statepb.Leader {
-		if s.State == statepb.Candidate {
-			//hack:
-			//fmt.Printf("MATCH CANDIDATE!!!!!!!!!!!!! STATE IS: %+v\n", s)
-			if ps.Log != nil && len(ps.Log) != 0 {
-				last_index := ps.Log[len(ps.Log)-1].CommandIndex
-				if last_index <= 7 && TermMatch(s, ps) && CommitIndexMatch(s, ps) && s.TestLeader() {
-					s.Leader()
-					s.HackEntries(ps.Log)
-					return s, true
-				}
+		//hack:
+		if ps.Log != nil && len(ps.Log) != 0 {
+			last_index := ps.Log[len(ps.Log)-1].CommandIndex
+			if last_index <= 7 {
+				s.HackEntries(ps.Log)
+				return s, StateMatch(s, ps) && TermMatch(s, ps)
 			}
-			if TermMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps) && s.TestLeader() {
-				s.Leader()
-				return s, true
-			}
-			return s, false
-		} else {
-			//hack:
-			if ps.Log != nil && len(ps.Log) != 0 {
-				last_index := ps.Log[len(ps.Log)-1].CommandIndex
-				if last_index <= 7 {
-					s.HackEntries(ps.Log)
-					return s, StateMatch(s, ps) && TermMatch(s, ps) && CommitIndexMatch(s, ps)
-				}
-			}
-			// s.HackEntries(ps.Log)
-			// fmt.Printf("ps is: %+v\n\n\n, state: %+v\n\n\n, match: %+v\n\n\n", ps, st, StateMatch(s, ps) && TermMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps))
-			return s, StateMatch(s, ps) && TermMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps)
 		}
+		// s.HackEntries(ps.Log)
+		// fmt.Printf("ps is: %+v\n\n\n, state: %+v\n\n\n, match: %+v\n\n\n", ps, st, CommitIndexMatch(s, ps))
+		return s, StateMatch(s, ps) && TermMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps)
+		// if s.State == statepb.Candidate {
+		// 	//hack:
+		// 	//fmt.Printf("MATCH CANDIDATE!!!!!!!!!!!!! STATE IS: %+v\n", s)
+		// 	if ps.Log != nil && len(ps.Log) != 0 {
+		// 		last_index := ps.Log[len(ps.Log)-1].CommandIndex
+		// 		if last_index <= 7 && TermMatch(s, ps) && CommitIndexMatch(s, ps) && s.TestLeader() {
+		// 			s.Leader()
+		// 			s.HackEntries(ps.Log)
+		// 			return s, true
+		// 		}
+		// 	}
+		// 	if TermMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps) && s.TestLeader() {
+		// 		s.Leader()
+		// 		return s, true
+		// 	}
+		// 	return s, false
+		// } else {
+		// 	//hack:
+		// 	if ps.Log != nil && len(ps.Log) != 0 {
+		// 		last_index := ps.Log[len(ps.Log)-1].CommandIndex
+		// 		if last_index <= 7 {
+		// 			s.HackEntries(ps.Log)
+		// 			return s, StateMatch(s, ps) && TermMatch(s, ps) && CommitIndexMatch(s, ps)
+		// 		}
+		// 	}
+		// 	// s.HackEntries(ps.Log)
+		// 	// fmt.Printf("ps is: %+v\n\n\n, state: %+v\n\n\n, match: %+v\n\n\n", ps, st, StateMatch(s, ps) && TermMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps))
+		// 	return s, StateMatch(s, ps) && TermMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps)
+		// }
 	} else if ps.State == statepb.Follower {
-		if s.State == statepb.Leader {
-			s.State = statepb.Follower
-			return s, TermMatch(s, ps) && VotedForMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps)
-		}
+		// if s.State == statepb.Leader {
+		// 	s.State = statepb.Follower
+		// 	return s, TermMatch(s, ps) && VotedForMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps)
+		// }
 		return s, StateMatch(s, ps) && TermMatch(s, ps) && VotedForMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps)
 	}
 	return s, true
 }
+
+// func PartialStateMatched(ps state.PartialState, st state.State) (state.State, bool) {
+// 	s := CopyState(st)
+// 	if ps.State == statepb.Candidate {
+// 		if ps.CurrentTerm > s.CurrentTerm {
+// 			if LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps) {
+// 				s.Candidate(ps.CurrentTerm)
+// 				return s, true
+// 			}
+// 			return s, false
+// 		} else if ps.CurrentTerm == s.CurrentTerm {
+// 			return s, StateMatch(s, ps) && VotedForMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps)
+// 		} else {
+// 			return s, false
+// 		}
+// 	} else if ps.State == statepb.Leader {
+// 		if s.State == statepb.Candidate {
+// 			//hack:
+// 			//fmt.Printf("MATCH CANDIDATE!!!!!!!!!!!!! STATE IS: %+v\n", s)
+// 			if ps.Log != nil && len(ps.Log) != 0 {
+// 				last_index := ps.Log[len(ps.Log)-1].CommandIndex
+// 				if last_index <= 7 && TermMatch(s, ps) && CommitIndexMatch(s, ps) && s.TestLeader() {
+// 					s.Leader()
+// 					s.HackEntries(ps.Log)
+// 					return s, true
+// 				}
+// 			}
+// 			if TermMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps) && s.TestLeader() {
+// 				s.Leader()
+// 				return s, true
+// 			}
+// 			return s, false
+// 		} else {
+// 			//hack:
+// 			if ps.Log != nil && len(ps.Log) != 0 {
+// 				last_index := ps.Log[len(ps.Log)-1].CommandIndex
+// 				if last_index <= 7 {
+// 					s.HackEntries(ps.Log)
+// 					return s, StateMatch(s, ps) && TermMatch(s, ps) && CommitIndexMatch(s, ps)
+// 				}
+// 			}
+// 			// s.HackEntries(ps.Log)
+// 			// fmt.Printf("ps is: %+v\n\n\n, state: %+v\n\n\n, match: %+v\n\n\n", ps, st, StateMatch(s, ps) && TermMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps))
+// 			return s, StateMatch(s, ps) && TermMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps)
+// 		}
+// 	} else if ps.State == statepb.Follower {
+// 		if s.State == statepb.Leader {
+// 			s.State = statepb.Follower
+// 			return s, TermMatch(s, ps) && VotedForMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps)
+// 		}
+// 		return s, StateMatch(s, ps) && TermMatch(s, ps) && VotedForMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps)
+// 	}
+// 	return s, true
+// }

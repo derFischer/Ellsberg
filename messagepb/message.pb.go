@@ -42,19 +42,26 @@ type MessageType int8
 
 const (
 	//raft messages
-	MsgApp      MessageType = 1
-	MsgAppResp  MessageType = 2
-	MsgVote     MessageType = 3
-	MsgVoteResp MessageType = 4
+	MsgApp           MessageType = 1
+	MsgAppResp       MessageType = 2
+	MsgVote          MessageType = 3
+	MsgVoteResp      MessageType = 4
+	MsgReadIndex     MessageType = 5
+	MsgReadIndexResp MessageType = 6
 
 	//client messages
-	ClientNormal     MessageType = 5
-	ClientKVPut      MessageType = 6
-	ClientKVRO       MessageType = 7
-	ClientConfChange MessageType = 8
+	ClientNormal     MessageType = 7
+	ClientKVPut      MessageType = 8
+	ClientKVRO       MessageType = 9
+	ClientConfChange MessageType = 10
 
-	ClientNormalResp MessageType = 9
-	ClientROResp     MessageType = 10
+	ClientNormalResp MessageType = 11
+	ClientROResp     MessageType = 12
+
+	//nil message
+	CheckLeader      MessageType = 13
+	CheckCommitIndex MessageType = 14
+	Timeout          MessageType = 15
 )
 
 type Message struct {
@@ -81,38 +88,38 @@ type Message struct {
 
 type Ctx interface{}
 
-type RequestVoteArgs struct {
-	From          uint64
-	To            uint64
-	MTerm         uint64
-	MLastLogIndex uint64
-	MLastLogTerm  uint64
-}
+// type RequestVoteArgs struct {
+// 	From          uint64
+// 	To            uint64
+// 	MTerm         uint64
+// 	MLastLogIndex uint64
+// 	MLastLogTerm  uint64
+// }
 
-type RequestVoteReply struct {
-	From         uint64
-	To           uint64
-	MTerm        uint64
-	MVoteGranted bool
-}
+// type RequestVoteReply struct {
+// 	From         uint64
+// 	To           uint64
+// 	MTerm        uint64
+// 	MVoteGranted bool
+// }
 
-type AppendEntriesArgs struct {
-	From          uint64
-	To            uint64
-	MTerm         uint64
-	MPrevLogIndex uint64
-	MPrevLogTerm  uint64
-	MEntries      []statepb.Command
-	MCommitIndex  uint64
-}
+// type AppendEntriesArgs struct {
+// 	From          uint64
+// 	To            uint64
+// 	MTerm         uint64
+// 	MPrevLogIndex uint64
+// 	MPrevLogTerm  uint64
+// 	MEntries      []statepb.Command
+// 	MCommitIndex  uint64
+// }
 
-type AppendEntriesReply struct {
-	From        uint64
-	To          uint64
-	MTerm       uint64
-	MSuccess    bool
-	MMatchIndex uint64
-}
+// type AppendEntriesReply struct {
+// 	From        uint64
+// 	To          uint64
+// 	MTerm       uint64
+// 	MSuccess    bool
+// 	MMatchIndex uint64
+// }
 
 type RespType int32
 
@@ -196,6 +203,12 @@ func RaftMsgInterpreter(message RaftMsg, send bool) (Message, Ctx) {
 			ctx := CtxInterpreter(msg.Context)
 			return Message{Type: MsgAppResp, From: msg.From, To: msg.To, Mterm: msg.Term, Success: !msg.Reject, MatchIndex: 0}, ctx
 		}
+	case raftpb.MsgReadIndex:
+		rctx := CtxInterpreter(msg.Entries[0].Data)
+		return Message{Type: MsgReadIndex, From: msg.From, To: msg.To, ReqID: rctx}, rctx
+	case raftpb.MsgReadIndexResp:
+		rctx := CtxInterpreter(msg.Entries[0].Data)
+		return Message{Type: MsgReadIndexResp, From: msg.From, To: msg.To, Mterm: msg.Term, ReqID: rctx, Index: msg.Index}, rctx
 	}
 	return Message{}, nil
 }

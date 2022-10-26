@@ -3,6 +3,7 @@ package partialOrder
 import (
 	// "fmt"
 	// "fmt"
+
 	"math"
 	"reflect"
 
@@ -10,6 +11,11 @@ import (
 	"go.etcd.io/etcd/v3/state"
 	"go.etcd.io/etcd/v3/statepb"
 )
+
+//nil events
+var checkLeaderEvent messagepb.Message = messagepb.Message{Type: messagepb.CheckLeader}
+var checkCommitIndex messagepb.Message = messagepb.Message{Type: messagepb.CheckCommitIndex}
+var timeout messagepb.Message = messagepb.Message{Type: messagepb.Timeout}
 
 type Msg struct {
 	msg     messagepb.Message
@@ -22,18 +28,22 @@ type node struct {
 	backtrack   []*Msg
 }
 
-type Path struct {
+type Start struct {
 	End_s             state.State
 	Remaining_pending []messagepb.Message
 }
 
-type EndState struct {
-	End         interface{}
-	Req         messagepb.Message
-	Connections []uint64
+type Path struct {
 }
 
-type MinimumPath struct {
+type EndState struct {
+	End          interface{}
+	Req          messagepb.Message
+	Connections  []uint64
+	Valid_indice []uint64
+}
+
+type MinimumStart struct {
 	End_s    state.State
 	messages []messagepb.Msg
 }
@@ -149,7 +159,8 @@ func pendingGC(p []messagepb.Message, s state.State, rm_index int, in []int) ([]
 func PickOneEnabledMsg(s state.State, end_s EndState, pendingMessages []messagepb.Message) (bool, messagepb.Message) {
 	for i := 0; i < len(pendingMessages); i++ {
 		// if end_s.enabled(s, pendingMessages[i]) {
-		if enabled(s, pendingMessages[i], end_s) {
+		msg_enabled, _, _ := enabled(s, pendingMessages[i], end_s)
+		if msg_enabled {
 			return true, pendingMessages[i]
 		}
 	}
@@ -157,7 +168,7 @@ func PickOneEnabledMsg(s state.State, end_s EndState, pendingMessages []messagep
 	return false, messagepb.Message{}
 }
 
-func equivalent(p1 Path, p2 Path) (bool, bool) {
+func equivalent(p1 Start, p2 Start) (bool, bool) {
 	// if !StateEqual(p1.End_s, p2.End_s) {
 	// 	return false, false
 	// }
@@ -198,7 +209,7 @@ func equivalent(p1 Path, p2 Path) (bool, bool) {
 	}
 }
 
-func append_dereplicate(result *[]Path, p Path) {
+func append_dereplicate(result *[]Start, p Start) {
 	add_p := false
 	exist_eq := false
 	for i := 0; i < len(*result); i++ {
@@ -219,19 +230,12 @@ func append_dereplicate(result *[]Path, p Path) {
 	}
 }
 
-func TraverseAllPaths(start_s state.State, end_s EndState, position int, current_msg messagepb.Message, p []messagepb.Message, v_index []int, result *[]Path, round *int, counter *int) {
+func TraverseAllStarts(start_s state.State, end_s EndState, position int, current_msg messagepb.Message, p []messagepb.Message, v_index []int, result *[]Start, round *int, counter *int) {
 	*round = *round + 1
-	// fmt.Printf("enter traverse paths\n\n\n")
-	// fmt.Printf("the current result set is: %+v\n\n\n", *result)
 	s, matched := matched(start_s, end_s)
 	if matched {
-		// fmt.Printf("!!!!!!!!!!!!!!!!!explore matched, state: %+v\n\n, end: %+v\n\n\n", start_s, end_s)
-		// fmt.Printf("matched a trace, pendings: %+v, end state: %+v\n", pendingMessages, end_s)
-		// *result = append(*result, Path{End_s: s, Remaining_pending: pendingMessages})
 		pendings, _ := pendingGC(p, s, math.MaxInt32, make([]int, 0))
-		// fmt.Printf("matched state log len: %+v, commit index: %+v\n", len(s.Log), s.CommitIndex)
-		append_dereplicate(result, Path{End_s: s, Remaining_pending: pendings})
-		// fmt.Printf("!!!!!!!!!!!!!!!!!find the trace, the result set: %+v\n\n\n", *result)
+		append_dereplicate(result, Start{End_s: s, Remaining_pending: pendings})
 		return
 	}
 
@@ -250,64 +254,66 @@ func TraverseAllPaths(start_s state.State, end_s EndState, position int, current
 
 		*counter = *counter + 1
 
-		if enabled(start_s, pendingMessages[index], end_s) {
-			// fmt.Printf("start state: %+v\n\n\n end state: %+v\n\n\n before apply %+v, the current result set is: %+v\n\n\n", start_s, end_s, pendingMessages[i], *result)
-			s_next, _ := Apply(start_s, pendingMessages[index])
-			// fmt.Printf("enabled!!! next state: %+v\n end: %+v\n", s_next, end_s)
-			// if len(s_next.Log) > 110 {
-			// 	log.Fatalf("log length > 100, commit index: %+v, last index: %+v\n", s_next.CommitIndex, s_next.GetLastCommandIndex())
-			// }
-			// fmt.Printf("after apply %+v, the current result set is: %+v\n\n\n the state is: %+v\n\n\n", pendingMessages[i], *result, s)
-			// fmt.Printf("before gc: p: %+v, index: %+v, valid_index: %+v", pendingMessages, index, valid_index)
+		msg_enabled, next, s_next := enabled(start_s, pendingMessages[index], end_s)
+		if msg_enabled {
+			if !next {
+				s_next, _ = Apply(start_s, pendingMessages[index])
+			}
+			if reflect.DeepEqual(s_next, start_s) {
+				continue
+			}
 			pending, in := pendingGC(append(pendingMessages[0:index], pendingMessages[index+1:]...), s_next, index, append(valid_index[0:i], valid_index[i+1:]...))
-			TraverseAllPaths(s_next, end_s, i, pendingMessages[index], pending, in, result, round, counter)
+			TraverseAllStarts(s_next, end_s, i, pendingMessages[index], pending, in, result, round, counter)
 		}
 	}
+
+	// fmt.Printf("nil event traverse all Starts: start state: %+v\n", start_s)
+	//nil events check:
+	msg_enabled, next, s_next := enabled(start_s, checkLeaderEvent, end_s)
+	if msg_enabled {
+		if !next {
+			s_next, _ = Apply(start_s, checkLeaderEvent)
+		}
+		if !reflect.DeepEqual(s_next, start_s) {
+			TraverseAllStarts(s_next, end_s, position, current_msg, p, v_index, result, round, counter)
+		}
+	}
+
+	msg_enabled, next, s_next = enabled(start_s, checkCommitIndex, end_s)
+	if msg_enabled {
+		if !next {
+			s_next, _ = Apply(start_s, checkCommitIndex)
+		}
+		if !reflect.DeepEqual(s_next, start_s) {
+			TraverseAllStarts(s_next, end_s, position, current_msg, p, v_index, result, round, counter)
+		}
+	}
+
+	msg_enabled, next, s_next = enabled(start_s, timeout, end_s)
+	if msg_enabled {
+		if !next {
+			s_next, _ = Apply(start_s, timeout)
+		}
+		if !reflect.DeepEqual(s_next, start_s) {
+			TraverseAllStarts(s_next, end_s, position, current_msg, p, v_index, result, round, counter)
+		}
+	}
+
 }
 
-// func FindMinimumSet(start_s state.State, end_s EndState, position int, current_msg messagepb.Msg, p []messagepb.Msg, msgs []messagepb.Msg, result *[]Path) {
-// 	fmt.Printf("enter find minimum set\n\n\n")
-// 	// fmt.Printf("the current result set is: %+v\n\n\n", *result)
-// 	s, matched := matched(start_s, end_s)
-// 	if matched {
-// 		// fmt.Printf("!!!!!!!!!!!!!!!!!explore matched, state: %+v\n\n, end: %+v\n\n\n", start_s, end_s)
-// 		// fmt.Printf("matched a trace, pendings: %+v, end state: %+v\n", pendingMessages, end_s)
-// 		// *result = append(*result, Path{End_s: s, Remaining_pending: pendingMessages})
-// 		append_dereplicate(result, Path{End_s: s, Remaining_pending: msgs})
-// 		// fmt.Printf("!!!!!!!!!!!!!!!!!find the trace, the result set: %+v\n\n\n", *result)
-// 		return
-// 	}
-
-// 	for i := 0; i < len(p); i++ {
-// 		if i < position {
-// 			if !dependent(p[i], current_msg) {
-// 				continue
-// 			}
-// 		}
-// 		pendingMessages := make([]messagepb.Msg, len(p))
-// 		copy(pendingMessages, p)
-// 		if enabled(start_s, pendingMessages[i], end_s) {
-// 			// fmt.Printf("start state: %+v\n\n\n end state: %+v\n\n\n before apply %+v, the current result set is: %+v\n\n\n", start_s, end_s, pendingMessages[i], *result)
-// 			s, _ := Apply(start_s, pendingMessages[i])
-// 			// fmt.Printf("after apply %+v, the current result set is: %+v\n\n\n the state is: %+v\n\n\n", pendingMessages[i], *result, s)
-// 			TraverseAllPaths(s, end_s, i, pendingMessages[i], pendingGC(append(pendingMessages[0:i], pendingMessages[i+1:]...), s), result)
-// 		}
-// 	}
-// }
-
-func Explore(path []*node, end_s EndState, pendingMessages []messagepb.Message, result *[]Path) {
-	last_node := path[len(path)-1]
+func Explore(start []*node, end_s EndState, pendingMessages []messagepb.Message, result *[]Start) {
+	last_node := start[len(start)-1]
 	s, matched := matched(last_node.s, end_s)
 	if matched {
-		*result = append(*result, Path{End_s: s, Remaining_pending: pendingMessages})
+		*result = append(*result, Start{End_s: s, Remaining_pending: pendingMessages})
 		return
 	}
 
 	for i := 0; i < len(pendingMessages); i++ {
 		pendingMessage := pendingMessages[i]
 		depend_index := -1
-		for j := 0; j < len(path); j++ {
-			node := path[j]
+		for j := 0; j < len(start); j++ {
+			node := start[j]
 			current_msg := node.current_msg
 			if !dependent(current_msg, pendingMessage) {
 				continue
@@ -315,9 +321,10 @@ func Explore(path []*node, end_s EndState, pendingMessages []messagepb.Message, 
 			depend_index = int(j)
 		}
 		if depend_index != -1 {
-			node := path[depend_index]
+			node := start[depend_index]
 			// if end_s.enabled(node.s, pendingMessage) {
-			if enabled(node.s, pendingMessage, end_s) {
+			msg_enabled, _, _ := enabled(node.s, pendingMessage, end_s)
+			if msg_enabled {
 				node.AddToBacktrack(pendingMessage, false)
 			}
 		}
@@ -333,8 +340,8 @@ func Explore(path []*node, end_s EndState, pendingMessages []messagepb.Message, 
 		bt_found, msg := last_node.Visit()
 		if bt_found {
 			last_node.current_msg = msg
-			new_p := make([]*node, len(path))
-			copy(new_p, path)
+			new_p := make([]*node, len(start))
+			copy(new_p, start)
 			s_next, _ := Apply(last_node.s, msg)
 			new_p = append(new_p, &node{s: s_next})
 			Explore(new_p, end_s, RemoveMsg(pendingMessages, msg), result)
@@ -343,8 +350,6 @@ func Explore(path []*node, end_s EndState, pendingMessages []messagepb.Message, 
 		}
 	}
 }
-
-// func FindMinimumSet()
 
 func filterPendings(start state.State, pendingMessages []messagepb.Message, end interface{}) []int {
 	switch end.(type) {
@@ -366,10 +371,6 @@ func filterPendings(start state.State, pendingMessages []messagepb.Message, end 
 		if start.GetLastCommandIndex() < end.(state.PartialState).Log[end_length-1].CommandIndex {
 			clientReq = true
 		}
-		// if !LogMatch(start, end.(state.PartialState).Log, math.MaxUint64, true) {
-		// 	clientReq = true
-		// }
-		// fmt.Printf("filter: VOTE: %+v, APP: %+v, CLIENTREQ: %+v\n", voteResp, appResp, clientReq)
 		res := make([]int, 0)
 		for i := 0; i < len(pendingMessages); i++ {
 			switch pendingMessages[i].Type {
@@ -398,24 +399,17 @@ func filterPendings(start state.State, pendingMessages []messagepb.Message, end 
 	}
 }
 
-func ExplorePaths(start state.State, pendingMessages []messagepb.Message, end messagepb.Message, connections []uint64) []Path {
-	//todo: first interpret the end state
-	// fmt.Printf("!!!!!!!!!!!!!START TO EXPLORE, STATE: %+v\n, PENDINGS: %v\n", start, pendingMessages)
-	path := make([]*node, 0)
-	path = append(path, &node{s: start})
-	result := make([]Path, 0)
+func ExploreStarts(start state.State, pendingMessages []messagepb.Message, end messagepb.Message, connections []uint64, valid_indices []uint64) []Start {
+	// fmt.Printf("explore Start from state: %+v\n to state: %+v\n ", start, end)
+	Start := make([]*node, 0)
+	Start = append(Start, &node{s: start})
+	result := make([]Start, 0)
 	e, req := Inference(end)
-	// fmt.Printf("!!!!!!!!!!!The end state is: %+v\n\n\n", e)
-	////fmt.Printf("MESSAGE IS: %+v\n INFERENCED STATE IS: %+v\n PENDINGS ARE: %+v\n", end, e, pendingMessages)
-	// Explore(path, EndState{End: e, Req: req}, pendingMessages, &result)
 
 	round := 0
 	counter := 0
 	fp := filterPendings(start, pendingMessages, e)
-	// fmt.Printf("start to explore path: start: %+v\n pendings: %+v\n end: %+v\n", start, pendingMessages, e)
-	TraverseAllPaths(start, EndState{End: e, Req: req, Connections: connections}, 0, messagepb.Message{}, pendingMessages, fp, &result, &round, &counter)
-	// fmt.Printf("start from %+v\n\n explore %+v\n\n finished, counter: %+v filerted pending: %+v, total pending: %+v\n\n p: %+v\n\n", start, e, counter, len(fp), len(pendingMessages), pendingMessages)
-	// fmt.Printf("explore finished, round: %+v counter: %+v filerted pending: %+v\n\n", round, counter, len(fp))
+	TraverseAllStarts(start, EndState{End: e, Req: req, Connections: connections, Valid_indice: valid_indices}, 0, messagepb.Message{}, pendingMessages, fp, &result, &round, &counter)
 	return result
 }
 
@@ -430,30 +424,16 @@ func RemoveMsg(pendingMessages []messagepb.Message, msg messagepb.Message) []mes
 }
 
 func matched(s state.State, end EndState) (state.State, bool) {
-	// s, r := s.Apply(next_msg)
-	// s := CopyState(st)
 	if end.End == nil {
 		return s, true
 	}
 	switch end.End.(type) {
 	case state.PartialState:
-		// _, s_1 := PartialStateMatched(end.End.(state.PartialState), s)
-		// if s_1 {
-		// 	fmt.Printf("partial state matched, state: %+v\n\n end: %+v\n\n\n", s, end)
-		// }
 		return PartialStateMatched(end.End.(state.PartialState), s)
 	case messagepb.Message:
 		if end.End.(messagepb.Message).Type == messagepb.ClientNormalResp {
-			// //////fmt.Printf("")
 			index := 0
-			// for i := end.(messagepb.Resp).Index; i <= s.GetLastCommandIndex(); i++ {
 			for i := 0; i < len(s.Log); i++ {
-				// if i < s.GetFirstCommandIndex() {
-				// 	continue
-				// }
-				// data := s.Log[i].Command.Data
-				// req := new(etcdserverpb.InternalRaftRequest)
-				// req.Unmarshal(data)
 				if reflect.DeepEqual(s.Log[i].Command.ReqID, end.End.(messagepb.Message).ReqID) {
 					index = i
 					break
@@ -461,7 +441,7 @@ func matched(s state.State, end EndState) (state.State, bool) {
 			}
 			return s, s.GetCommitIndex() >= (uint64(index) + s.GetFirstCommandIndex())
 		} else if end.End.(messagepb.Message).Type == messagepb.ClientROResp {
-			return s, s.QuorumActive(end.Connections) && s.SearchGet(end.End.(messagepb.Message))
+			return s, (s.QuorumActive(end.Connections) || s.IndexValid(end.Valid_indice)) && s.SearchGet(end.End.(messagepb.Message))
 		}
 	default:
 		s, r := Apply(s, end.Req)
@@ -470,33 +450,34 @@ func matched(s state.State, end EndState) (state.State, bool) {
 	return s, true
 }
 
-func enabled(s state.State, msg messagepb.Message, end EndState) bool {
+func enabled(s state.State, msg messagepb.Message, end EndState) (bool, bool, state.State) {
+	s = CopyState(s)
 	switch end.End.(type) {
 	case state.PartialState:
 		return ParitialStateEnabled(end.End.(state.PartialState), s, msg)
 	case messagepb.Message:
 		end_msg := end.End.(messagepb.Message)
 		if msg.Mterm > end_msg.Mterm {
-			return false
+			return false, false, state.State{}
 		}
 		switch end_msg.Type {
 		case messagepb.ClientNormalResp, messagepb.ClientROResp:
-			return true
+			return true, false, state.State{}
 		case messagepb.MsgAppResp:
 			s, _ := Apply(s, msg)
 			if end_msg.Success {
-				return LogMatch(s, end.Req.MEntries, s.CommitIndex, false)
+				return LogMatch(s, end.Req.MEntries, s.CommitIndex, false), true, s
 			}
-			return true
+			return true, true, s
 		case messagepb.MsgVoteResp:
 			s, _ := Apply(s, msg)
 			if end_msg.Success {
 				if s.CurrentTerm == end_msg.Mterm && s.VotedFor != end_msg.To && s.VotedFor != state.NOONE {
-					return false
+					return false, true, s
 				}
 			}
-			return true
+			return true, true, s
 		}
 	}
-	return true
+	return true, false, state.State{}
 }

@@ -30,80 +30,167 @@ type State struct {
 	Peers       []uint64
 }
 
-func (s *State) ClientRequestHandler(args statepb.Op) {
+func (s *State) ClientRequestHandler(args messagepb.Message) {
+	t := statepb.EntryUnknown
+	if args.Type == messagepb.ClientKVPut {
+		t = statepb.EntryKVPut
+	} else if args.Type == messagepb.ClientNormal {
+		t = statepb.EntryNormal
+	} else if args.Type == messagepb.ClientConfChange {
+		t = statepb.EntryConfChange
+	}
+
 	if s.State == statepb.Leader {
-		s.Log = append(s.Log, statepb.Command{CommandIndex: s.GetLastCommandIndex() + 1, CommandTerm: s.CurrentTerm, Command: args})
+		s.Log = append(s.Log, statepb.Command{CommandIndex: s.GetLastCommandIndex() + 1, CommandTerm: s.CurrentTerm, Command: statepb.Op{ReqID: args.ReqID, Type: t, Key: args.Key, Value: args.Value, Data: args.Data}})
+		s.MmatchIndex[inSlice(s.Peers, s.Me)] = s.GetLastCommandIndex()
 	}
 }
 
-func (s *State) RequestVoteRequestHandler(args messagepb.RequestVoteArgs) messagepb.RequestVoteReply {
-	r := messagepb.RequestVoteReply{From: s.Me, To: args.From}
-	if s.DropStaleResponse(args.MTerm) {
-		r.MTerm = s.CurrentTerm
-		r.MVoteGranted = false
+// func (s *State) RequestVoteRequestHandler(args messagepb.RequestVoteArgs) messagepb.RequestVoteReply {
+// 	r := messagepb.RequestVoteReply{From: s.Me, To: args.From}
+// 	if s.DropStaleResponse(args.MTerm) {
+// 		r.MTerm = s.CurrentTerm
+// 		r.MVoteGranted = false
+// 		return r
+// 	}
+// 	s.UpdateTerm(args.MTerm)
+// 	logOK := (args.MLastLogTerm > s.GetLastCommandTerm()) || (args.MLastLogTerm == s.GetLastCommandTerm() && args.MLastLogIndex >= s.GetLastCommandIndex())
+// 	grant := (args.MTerm == s.CurrentTerm) && logOK && (s.VotedFor == NOONE || s.VotedFor == args.From)
+// 	if grant {
+// 		s.VotedFor = args.From
+// 	}
+// 	r.MTerm = s.CurrentTerm
+// 	r.MVoteGranted = grant
+// 	return r
+// }
+
+// func (s *State) AppendEntryRequestHandler(args messagepb.AppendEntriesArgs) messagepb.AppendEntriesReply {
+// 	r := messagepb.AppendEntriesReply{From: s.Me, To: args.From}
+// 	if s.DropStaleResponse(args.MTerm) {
+// 		r.MTerm = s.CurrentTerm
+// 		r.MSuccess = false
+// 		return r
+// 	}
+// 	s.UpdateTerm(args.MTerm)
+// 	logOK := (args.MPrevLogIndex == 0) || (args.MPrevLogIndex > 0 && args.MPrevLogIndex <= s.GetLastCommandIndex() && Equal(args.MPrevLogTerm, s.GetCommandTerm(args.MPrevLogIndex)))
+
+// 	if args.MTerm == s.CurrentTerm && s.State == statepb.Follower && !logOK {
+// 		r.MTerm = s.CurrentTerm
+// 		r.MSuccess = false
+// 		return r
+// 	}
+// 	if args.MTerm == s.CurrentTerm && s.State == statepb.Candidate {
+// 		s.State = statepb.Follower
+// 	}
+// 	if args.MTerm == s.CurrentTerm && s.State == statepb.Follower && logOK {
+// 		s.appendEntries(args.MEntries)
+// 		s.CommitIndex = max(s.CommitIndex, args.MCommitIndex)
+// 	}
+// 	r.MTerm = s.CurrentTerm
+// 	r.MSuccess = (args.MTerm == s.CurrentTerm) && (s.State == statepb.Follower) && logOK
+// 	r.MMatchIndex = args.MPrevLogIndex + uint64(len(args.MEntries))
+// 	return r
+// }
+
+// func (s *State) RequestVoteReplyHandler(reply messagepb.RequestVoteReply) {
+// 	if s.DropStaleResponse(reply.MTerm) {
+// 		return
+// 	}
+// 	s.UpdateTerm(reply.MTerm)
+
+// 	if reply.MVoteGranted {
+// 		s.ReceiveVotes(reply.From)
+// 	}
+// 	return
+// }
+
+// func (s *State) AppendEntryReplyHandler(reply messagepb.AppendEntriesReply) {
+// 	if s.DropStaleResponse(reply.MTerm) {
+// 		return
+// 	}
+// 	s.UpdateTerm(reply.MTerm)
+// 	if reply.MSuccess {
+// 		s.MmatchIndex[inSlice(s.Peers, reply.From)] = max(reply.MMatchIndex, s.MmatchIndex[inSlice(s.Peers, reply.From)])
+// 		// s.updateCommitIndex()
+// 	}
+// 	return
+// }
+
+func (s *State) RequestVoteRequestHandler(args messagepb.Message) messagepb.Message {
+	r := messagepb.Message{Type: messagepb.MsgVoteResp, From: s.Me, To: args.From}
+	if s.DropStaleResponse(args.Mterm) {
+		r.Mterm = s.CurrentTerm
+		r.Success = false
 		return r
 	}
-	s.UpdateTerm(args.MTerm)
-	logOK := (args.MLastLogTerm > s.GetLastCommandTerm()) || (args.MLastLogTerm == s.GetLastCommandTerm() && args.MLastLogIndex >= s.GetLastCommandIndex())
-	grant := (args.MTerm == s.CurrentTerm) && logOK && (s.VotedFor == NOONE || s.VotedFor == args.From)
+	s.UpdateTerm(args.Mterm)
+	logOK := (args.Index > s.GetLastCommandIndex()) || (args.IndexTerm == s.GetLastCommandTerm() && args.Index >= s.GetLastCommandIndex())
+	grant := (args.Mterm == s.CurrentTerm) && logOK && (s.VotedFor == NOONE || s.VotedFor == args.From)
 	if grant {
 		s.VotedFor = args.From
 	}
-	r.MTerm = s.CurrentTerm
-	r.MVoteGranted = grant
+	r.Mterm = s.CurrentTerm
+	r.Success = grant
 	return r
 }
 
-func (s *State) AppendEntryRequestHandler(args messagepb.AppendEntriesArgs) messagepb.AppendEntriesReply {
-	r := messagepb.AppendEntriesReply{From: s.Me, To: args.From}
-	if s.DropStaleResponse(args.MTerm) {
-		r.MTerm = s.CurrentTerm
-		r.MSuccess = false
+func (s *State) AppendEntryRequestHandler(args messagepb.Message) messagepb.Message {
+	r := messagepb.Message{Type: messagepb.MsgAppResp, From: s.Me, To: args.From}
+	if s.DropStaleResponse(args.Mterm) {
+		r.Mterm = s.CurrentTerm
+		r.Success = false
 		return r
 	}
-	s.UpdateTerm(args.MTerm)
-	logOK := (args.MPrevLogIndex == 0) || (args.MPrevLogIndex > 0 && args.MPrevLogIndex <= s.GetLastCommandIndex() && Equal(args.MPrevLogTerm, s.GetCommandTerm(args.MPrevLogIndex)))
+	s.UpdateTerm(args.Mterm)
+	logOK := (args.Index == 0) || (args.Index > 0 && args.Index <= s.GetLastCommandIndex() && Equal(args.IndexTerm, s.GetCommandTerm(args.Index)))
 
-	if args.MTerm == s.CurrentTerm && s.State == statepb.Follower && !logOK {
-		r.MTerm = s.CurrentTerm
-		r.MSuccess = false
+	if args.Mterm == s.CurrentTerm && s.State == statepb.Follower && !logOK {
+		r.Mterm = s.CurrentTerm
+		r.Success = false
 		return r
 	}
-	if args.MTerm == s.CurrentTerm && s.State == statepb.Candidate {
+	if args.Mterm == s.CurrentTerm && s.State == statepb.Candidate {
 		s.State = statepb.Follower
 	}
-	if args.MTerm == s.CurrentTerm && s.State == statepb.Follower && logOK {
+	if args.Mterm == s.CurrentTerm && s.State == statepb.Follower && logOK {
 		s.appendEntries(args.MEntries)
-		s.CommitIndex = max(s.CommitIndex, args.MCommitIndex)
+		s.CommitIndex = max(s.CommitIndex, args.CommitIndex)
 	}
-	r.MTerm = s.CurrentTerm
-	r.MSuccess = (args.MTerm == s.CurrentTerm) && (s.State == statepb.Follower) && logOK
-	r.MMatchIndex = args.MPrevLogIndex + uint64(len(args.MEntries))
+	r.Mterm = s.CurrentTerm
+	r.Success = (args.Mterm == s.CurrentTerm) && (s.State == statepb.Follower) && logOK
+	r.MatchIndex = args.Index + uint64(len(args.MEntries))
 	return r
 }
 
-func (s *State) RequestVoteReplyHandler(reply messagepb.RequestVoteReply) {
-	if s.DropStaleResponse(reply.MTerm) {
+func (s *State) RequestVoteReplyHandler(reply messagepb.Message) {
+	if s.DropStaleResponse(reply.Mterm) {
 		return
 	}
-	s.UpdateTerm(reply.MTerm)
+	s.UpdateTerm(reply.Mterm)
 
-	if reply.MVoteGranted {
+	if reply.Success {
 		s.ReceiveVotes(reply.From)
 	}
 	return
 }
 
-func (s *State) AppendEntryReplyHandler(reply messagepb.AppendEntriesReply) {
-	if s.DropStaleResponse(reply.MTerm) {
+func (s *State) AppendEntryReplyHandler(reply messagepb.Message) {
+	if s.DropStaleResponse(reply.Mterm) {
 		return
 	}
-	s.UpdateTerm(reply.MTerm)
-	if reply.MSuccess {
-		s.MmatchIndex[inSlice(s.Peers, reply.From)] = max(reply.MMatchIndex, s.MmatchIndex[inSlice(s.Peers, reply.From)])
-		s.updateCommitIndex()
+	s.UpdateTerm(reply.Mterm)
+	if reply.Success {
+		s.MmatchIndex[inSlice(s.Peers, reply.From)] = max(reply.MatchIndex, s.MmatchIndex[inSlice(s.Peers, reply.From)])
+		// s.updateCommitIndex()
 	}
 	return
+}
+
+func (s *State) ReadIndexReplyHandler(reply messagepb.Message) {
+	if s.DropStaleResponse(reply.Mterm) {
+		return
+	}
+	s.UpdateTerm(reply.Mterm)
 }
 
 //other functions
@@ -142,6 +229,12 @@ func (s *State) TestLeader() bool {
 	return false
 }
 
+func (s *State) CheckLeader() {
+	if s.TestLeader() {
+		s.Leader()
+	}
+}
+
 func (s *State) Candidate(term uint64) {
 	s.State = statepb.Candidate
 	s.CurrentTerm = term
@@ -150,6 +243,10 @@ func (s *State) Candidate(term uint64) {
 		s.Votes[i] = false
 	}
 	s.ReceiveVotes(s.Me)
+}
+
+func (s *State) BecomeCandidate() {
+	s.Candidate(s.CurrentTerm + 1)
 }
 
 func (s *State) Follower() {
@@ -166,7 +263,7 @@ func (s *State) Leader() {
 	s.MmatchIndex[inSlice(s.Peers, s.Me)] = s.GetLastCommandIndex()
 }
 
-func (s *State) updateCommitIndex() {
+func (s *State) UpdateCommitIndex() {
 	s.MmatchIndex[inSlice(s.Peers, s.Me)] = s.GetLastCommandIndex()
 	majority := findMajority(s.MmatchIndex)
 	if majority > s.CommitIndex {
@@ -355,6 +452,15 @@ func (s *State) QuorumActive(connections []uint64) bool {
 		}
 	}
 	return count > len(s.Peers)/2
+}
+
+func (s *State) IndexValid(valid_indice []uint64) bool {
+	for _, i := range valid_indice {
+		if i <= s.CommitIndex {
+			return true
+		}
+	}
+	return false
 }
 
 //helper function

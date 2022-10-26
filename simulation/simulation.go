@@ -22,6 +22,7 @@ import (
 type Connection struct {
 	ref int
 	ids []uint64
+	// index uint64
 }
 
 type ROEntry struct {
@@ -29,13 +30,20 @@ type ROEntry struct {
 	Ctxs  []messagepb.Ctx
 }
 
+type RIndex struct {
+	ref   int
+	index uint64
+	// term  uint64
+}
+
 type Simulation struct {
 	mu          sync.Mutex // Lock to protect shared access to this peer's state
 	me          uint64
-	States      []partialOrder.Path
+	States      []partialOrder.Start
 	MsgCh       chan messagepb.Msg
 	Connections map[messagepb.Ctx]Connection
 	ROReq       []ROEntry
+	ReadIndex   map[messagepb.Ctx]RIndex
 }
 
 func StartSimulationServer(id uint64, peers []uint64) *Simulation {
@@ -43,6 +51,7 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	votes := make([]bool, total)
 	matchIndex := make([]uint64, total)
 	alive := make(map[messagepb.Ctx]Connection)
+	rindex := make(map[messagepb.Ctx]RIndex)
 
 	for i := 0; i < total; i++ {
 		votes[i] = false
@@ -58,10 +67,11 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 
 	sl := new(Simulation)
 	sl.me = id
-	sl.States = make([]partialOrder.Path, 1)
-	sl.States[0] = partialOrder.Path{End_s: state.State{Me: id, State: statepb.Follower, CurrentTerm: 1, VotedFor: state.NOONE, Votes: votes, Log: lg, CommitIndex: 3, MmatchIndex: matchIndex, Peers: peers}}
+	sl.States = make([]partialOrder.Start, 1)
+	sl.States[0] = partialOrder.Start{End_s: state.State{Me: id, State: statepb.Follower, CurrentTerm: 1, VotedFor: state.NOONE, Votes: votes, Log: lg, CommitIndex: 3, MmatchIndex: matchIndex, Peers: peers}}
 	sl.MsgCh = make(chan messagepb.Msg)
 	sl.Connections = alive
+	sl.ReadIndex = rindex
 
 	sl.ROReq = make([]ROEntry, 0)
 
@@ -85,46 +95,27 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 }
 
 func (s *Simulation) sendMsg(message messagepb.Msg) {
-	// fmt.Printf("sending out message: %+v\n", message)
+	fmt.Printf("sending out message: %+v\n\n\n", message)
 	msg, ctx := messagepb.MsgInterpreter(message)
-	s.InitializeCtx(ctx)
-
-	connected_peers := []uint64{}
-	ROResp := (msg.Type == messagepb.ClientROResp)
-	if ROResp {
-		found, entry := s.searchInROReq(msg.ReqID)
-		if !found {
-			log.Fatalf("haven't received the client req for response %+v before\n", msg)
-		}
-		for i := 0; i < len(entry.Ctxs); i++ {
-			ctx := entry.Ctxs[i]
-			connection := s.Connections[ctx]
-			for _, id := range connection.ids {
-				if inSlice(connected_peers, id) == -1 {
-					connected_peers = append(connected_peers, id)
-				}
-			}
-		}
-		fmt.Printf("connected peers after this read: %+v\n", connected_peers)
-	}
-	s.CheckMsg(msg, connected_peers)
+	connected_peers, valid_indice := s.ROSendPreprocess(msg, ctx)
+	s.CheckMsg(msg, connected_peers, valid_indice)
+	fmt.Printf("the states after sending the message: %+v\n\n\n", s.States)
 }
 
 func (s *Simulation) receiveMsg(message messagepb.Msg) {
 	msg, ctx := messagepb.MsgInterpreter(message)
-	s.ConnectionAlive(msg.From, ctx)
-
-	if msg.Type == messagepb.ClientKVRO {
-		s.ROReq = append(s.ROReq, ROEntry{ReqID: msg.ReqID})
+	if msg.Type != messagepb.MsgAppResp {
+		fmt.Printf("receive read index resp: %+v\n", msg)
 	}
+	s.ROReceivePreprocess(msg, ctx)
 	s.AddPendings(msg)
 }
 
-func (s *Simulation) CheckMsg(msg messagepb.Message, connected_peers []uint64) {
-	tmp_state := make([]partialOrder.Path, 0)
+func (s *Simulation) CheckMsg(msg messagepb.Message, connected_peers []uint64, valid_indice []uint64) {
+	tmp_state := make([]partialOrder.Start, 0)
 	for i := 0; i < len(s.States); i++ {
-		paths := partialOrder.ExplorePaths(s.States[i].End_s, s.States[i].Remaining_pending, msg, connected_peers)
-		tmp_state = append(tmp_state, paths...)
+		Starts := partialOrder.ExploreStarts(s.States[i].End_s, s.States[i].Remaining_pending, msg, connected_peers, valid_indice)
+		tmp_state = append(tmp_state, Starts...)
 	}
 	if len(tmp_state) == 0 {
 		fmt.Printf("No valid states for this message. The message: %+v\n ", msg)
@@ -134,12 +125,74 @@ func (s *Simulation) CheckMsg(msg messagepb.Message, connected_peers []uint64) {
 	s.States = tmp_state
 }
 
-func (s *Simulation) InitializeCtx(ctx messagepb.Ctx) {
+func (s *Simulation) AddPendings(msg messagepb.Message) {
+	//msg read index wouldn't affect the states
+	if msg.Type == messagepb.MsgReadIndex {
+		return
+	}
+	for i := 0; i < len(s.States); i++ {
+		if partialOrder.Drop(msg, s.States[i].End_s) {
+			continue
+		}
+		// t, m, _ := messagepb.MsgInterpreter(msg)
+		// fmt.Printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!add %+v %v to pendings\n\n\n", t, m)
+		s.States[i].Remaining_pending = append(s.States[i].Remaining_pending, msg)
+	}
+}
+
+//read only requests related, these requests wouldn't have any effects on the states
+
+func (s *Simulation) ROSendPreprocess(msg messagepb.Message, ctx messagepb.Ctx) ([]uint64, []uint64) {
+	s.InitializeCtx(msg.Type == messagepb.MsgReadIndex, ctx)
+	connected_peers := []uint64{}
+	valid_indice := []uint64{}
+	// ROResp := (msg.Type == messagepb.ClientROResp)
+
+	if msg.Type == messagepb.ClientROResp {
+		found, entry := s.searchInROReq(msg.ReqID)
+		if !found {
+			log.Fatalf("haven't received the client req for response %+v before\n", msg)
+		}
+		for i := 0; i < len(entry.Ctxs); i++ {
+			ctx := entry.Ctxs[i]
+			connection, exists := s.Connections[ctx]
+			if exists {
+				for _, id := range connection.ids {
+					if inSlice(connected_peers, id) == -1 {
+						connected_peers = append(connected_peers, id)
+					}
+				}
+			} else {
+				valid_index, exists := s.ReadIndex[ctx]
+				if !exists {
+					log.Fatalf("the context %+v is neither in connections nor read index, ERROR!\n", ctx)
+				}
+				valid_indice = append(valid_indice, valid_index.index)
+			}
+		}
+		// fmt.Printf("connected peers after this read: %+v\n", connected_peers)
+	}
+	return connected_peers, valid_indice
+}
+
+func (s *Simulation) ROReceivePreprocess(msg messagepb.Message, ctx messagepb.Ctx) {
+	s.CtxAlive(msg.Type == messagepb.MsgReadIndexResp, msg.From, msg.Index, ctx)
+	if msg.Type == messagepb.ClientKVRO || msg.Type == messagepb.MsgReadIndex {
+		s.ROReq = append(s.ROReq, ROEntry{ReqID: msg.ReqID})
+	}
+}
+
+func (s *Simulation) InitializeCtx(rindex bool, ctx messagepb.Ctx) {
 	if ctx == nil {
 		return
 	}
+	found := true
 	// fmt.Printf("initialize ctx: %+v, current pending ro reqs: %+v\n", ctx, s.ROReq)
-	found := s.searchConnection(ctx, true, len(s.ROReq))
+	if !rindex {
+		found = s.searchConnection(ctx, true, len(s.ROReq))
+	} else {
+		found = s.searchRIndex(ctx, true, len(s.ROReq))
+	}
 	if found {
 		return
 	}
@@ -149,28 +202,48 @@ func (s *Simulation) InitializeCtx(ctx messagepb.Ctx) {
 	}
 }
 
-func (s *Simulation) ConnectionAlive(id uint64, ctx messagepb.Ctx) {
+func (s *Simulation) CtxAlive(rindex bool, id uint64, index uint64, ctx messagepb.Ctx) {
 	if ctx == nil {
 		return
 	}
 	// fmt.Printf("connection alive: %+v\n", ctx)
-	found := s.searchConnection(ctx, false, 0)
+	found := false
+
+	if !rindex {
+		found = s.searchConnection(ctx, false, 0)
+	} else {
+		found = s.searchRIndex(ctx, false, 0)
+	}
+
+	if !found {
+		return
+	}
+
 	if found {
-		connection := s.Connections[ctx]
-		if inSlice(connection.ids, id) == -1 {
-			s.Connections[ctx] = Connection{ref: connection.ref, ids: append(connection.ids, id)}
+		if !rindex {
+			connection := s.Connections[ctx]
+			if inSlice(connection.ids, id) == -1 {
+				s.Connections[ctx] = Connection{ref: connection.ref, ids: append(connection.ids, id)}
+			}
+		} else {
+			rindex := s.ReadIndex[ctx]
+			s.ReadIndex[ctx] = RIndex{ref: rindex.ref, index: index}
 		}
 	}
 }
 
-func (s *Simulation) AddPendings(msg messagepb.Message) {
-	for i := 0; i < len(s.States); i++ {
-		if partialOrder.Drop(msg, s.States[i].End_s) {
-			continue
+func (s *Simulation) ConnectionGC() {
+	if len(s.Connections) < 50 {
+		return
+	}
+
+	for ctx, connection := range s.Connections {
+		if connection.ref == 0 {
+			delete(s.Connections, ctx)
 		}
-		// t, m, _ := messagepb.MsgInterpreter(msg)
-		// fmt.Printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!add %+v %v to pendings\n\n\n", t, m)
-		s.States[i].Remaining_pending = append(s.States[i].Remaining_pending, msg)
+		if connection.ref < 0 {
+			log.Fatalf("connection ref < 0! ERROR! ctx: %+v\n", ctx)
+		}
 	}
 }
 
@@ -182,6 +255,17 @@ func (s *Simulation) searchConnection(ctx messagepb.Ctx, add bool, ref int) bool
 	}
 	if add {
 		s.Connections[ctx] = Connection{ref: ref}
+	}
+	return false
+}
+
+func (s *Simulation) searchRIndex(ctx messagepb.Ctx, add bool, ref int) bool {
+	_, exists := s.ReadIndex[ctx]
+	if exists {
+		return true
+	}
+	if add {
+		s.ReadIndex[ctx] = RIndex{ref: ref}
 	}
 	return false
 }
@@ -226,18 +310,18 @@ func inSlice(s []uint64, e uint64) int {
 }
 
 //debug function
-func dumpPath(path partialOrder.Path) {
-	fmt.Printf("STATE: %+v\n", path.End_s.State)
-	fmt.Printf("TERM: %+v\n", path.End_s.CurrentTerm)
-	fmt.Printf("VOTEDFOR: %+v\n", path.End_s.VotedFor)
-	fmt.Printf("VOTES: %+v\n", path.End_s.Votes)
-	fmt.Printf("LOG:%+v\n", path.End_s.Log)
-	fmt.Printf("COMMITINDEX: %+v\n", path.End_s.CommitIndex)
-	fmt.Printf("MMATCHINDEX: %+v\n\n\n", path.End_s.MmatchIndex)
+func dumpStart(Start partialOrder.Start) {
+	fmt.Printf("STATE: %+v\n", Start.End_s.State)
+	fmt.Printf("TERM: %+v\n", Start.End_s.CurrentTerm)
+	fmt.Printf("VOTEDFOR: %+v\n", Start.End_s.VotedFor)
+	fmt.Printf("VOTES: %+v\n", Start.End_s.Votes)
+	fmt.Printf("LOG:%+v\n", Start.End_s.Log)
+	fmt.Printf("COMMITINDEX: %+v\n", Start.End_s.CommitIndex)
+	fmt.Printf("MMATCHINDEX: %+v\n\n\n", Start.End_s.MmatchIndex)
 
 	fmt.Printf("remaining message:\n\n")
-	for i := 0; i < len(path.Remaining_pending); i++ {
-		fmt.Printf("%+v\n", path.Remaining_pending[i])
+	for i := 0; i < len(Start.Remaining_pending); i++ {
+		fmt.Printf("%+v\n", Start.Remaining_pending[i])
 	}
 	fmt.Printf("\n\n\n\n")
 }
@@ -245,6 +329,6 @@ func dumpPath(path partialOrder.Path) {
 func (s *Simulation) dump() {
 	fmt.Printf("-----------------------------------------------states size is %+v--------------------------------------------------\n\n", len(s.States))
 	for i := 0; i < len(s.States); i++ {
-		dumpPath(s.States[i])
+		dumpStart(s.States[i])
 	}
 }
