@@ -68,7 +68,7 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	sl := new(Simulation)
 	sl.me = id
 	sl.States = make([]partialOrder.Start, 1)
-	sl.States[0] = partialOrder.Start{End_s: state.State{Me: id, State: statepb.Follower, CurrentTerm: 1, VotedFor: state.NOONE, Votes: votes, Log: lg, CommitIndex: 3, MmatchIndex: matchIndex, Peers: peers}}
+	sl.States[0] = partialOrder.Start{States: state.State{Me: id, State: statepb.Follower, CurrentTerm: 1, VotedFor: state.NOONE, Votes: votes, Log: lg, CommitIndex: 3, MmatchIndex: matchIndex, Peers: peers}}
 	sl.MsgCh = make(chan messagepb.Msg)
 	sl.Connections = alive
 	sl.ReadIndex = rindex
@@ -95,18 +95,18 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 }
 
 func (s *Simulation) sendMsg(message messagepb.Msg) {
-	fmt.Printf("sending out message: %+v\n\n\n", message)
+	// fmt.Printf("sending out message: %+v\n\n\n", message)
 	msg, ctx := messagepb.MsgInterpreter(message)
 	connected_peers, valid_indice := s.ROSendPreprocess(msg, ctx)
 	s.CheckMsg(msg, connected_peers, valid_indice)
-	fmt.Printf("the states after sending the message: %+v\n\n\n", s.States)
+	// fmt.Printf("the states after sending the message: %+v\n\n\n", s.States)
 }
 
 func (s *Simulation) receiveMsg(message messagepb.Msg) {
 	msg, ctx := messagepb.MsgInterpreter(message)
-	if msg.Type != messagepb.MsgAppResp {
-		fmt.Printf("receive read index resp: %+v\n", msg)
-	}
+	// if msg.Type != messagepb.MsgAppResp {
+	// 	fmt.Printf("receive read index resp: %+v\n", msg)
+	// }
 	s.ROReceivePreprocess(msg, ctx)
 	s.AddPendings(msg)
 }
@@ -114,13 +114,13 @@ func (s *Simulation) receiveMsg(message messagepb.Msg) {
 func (s *Simulation) CheckMsg(msg messagepb.Message, connected_peers []uint64, valid_indice []uint64) {
 	tmp_state := make([]partialOrder.Start, 0)
 	for i := 0; i < len(s.States); i++ {
-		Starts := partialOrder.ExploreStarts(s.States[i].End_s, s.States[i].Remaining_pending, msg, connected_peers, valid_indice)
+		Starts := partialOrder.ExplorePaths(s.States[i].States, s.States[i].Remaining_pending, msg, connected_peers, valid_indice)
 		tmp_state = append(tmp_state, Starts...)
 	}
 	if len(tmp_state) == 0 {
-		fmt.Printf("No valid states for this message. The message: %+v\n ", msg)
-		s.dump()
-		log.Fatalf("No valid states for this message.")
+		// fmt.Printf("No valid states for this message. The message: %+v\n ", msg)
+		// s.dump()
+		log.Fatalf("No valid states for this message: %+v\n", msg)
 	}
 	s.States = tmp_state
 }
@@ -131,7 +131,7 @@ func (s *Simulation) AddPendings(msg messagepb.Message) {
 		return
 	}
 	for i := 0; i < len(s.States); i++ {
-		if partialOrder.Drop(msg, s.States[i].End_s) {
+		if partialOrder.Drop(msg, s.States[i].States) {
 			continue
 		}
 		// t, m, _ := messagepb.MsgInterpreter(msg)
@@ -311,13 +311,13 @@ func inSlice(s []uint64, e uint64) int {
 
 //debug function
 func dumpStart(Start partialOrder.Start) {
-	fmt.Printf("STATE: %+v\n", Start.End_s.State)
-	fmt.Printf("TERM: %+v\n", Start.End_s.CurrentTerm)
-	fmt.Printf("VOTEDFOR: %+v\n", Start.End_s.VotedFor)
-	fmt.Printf("VOTES: %+v\n", Start.End_s.Votes)
-	fmt.Printf("LOG:%+v\n", Start.End_s.Log)
-	fmt.Printf("COMMITINDEX: %+v\n", Start.End_s.CommitIndex)
-	fmt.Printf("MMATCHINDEX: %+v\n\n\n", Start.End_s.MmatchIndex)
+	fmt.Printf("STATE: %+v\n", Start.States.State)
+	fmt.Printf("TERM: %+v\n", Start.States.CurrentTerm)
+	fmt.Printf("VOTEDFOR: %+v\n", Start.States.VotedFor)
+	fmt.Printf("VOTES: %+v\n", Start.States.Votes)
+	fmt.Printf("LOG:%+v\n", Start.States.Log)
+	fmt.Printf("COMMITINDEX: %+v\n", Start.States.CommitIndex)
+	fmt.Printf("MMATCHINDEX: %+v\n\n\n", Start.States.MmatchIndex)
 
 	fmt.Printf("remaining message:\n\n")
 	for i := 0; i < len(Start.Remaining_pending); i++ {
