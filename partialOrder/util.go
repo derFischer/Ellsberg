@@ -1,7 +1,6 @@
 package partialOrder
 
 import (
-	"fmt"
 	"log"
 	"math"
 	"reflect"
@@ -263,7 +262,7 @@ func PartialStateMatched(ps state.PartialState, st state.State) (state.State, bo
 			last_index := ps.Log[len(ps.Log)-1].CommandIndex
 			if last_index <= 7 {
 				s.HackEntries(ps.Log)
-				fmt.Printf("----------------entering hack, after hack--------------------- %+v local state: %+v\n partial state %+v\n", StateMatch(s, ps) && TermMatch(s, ps), s, ps)
+				// fmt.Printf("----------------entering hack, after hack--------------------- %+v local state: %+v\n partial state %+v\n", StateMatch(s, ps) && TermMatch(s, ps), s, ps)
 				return s, StateMatch(s, ps) && TermMatch(s, ps)
 			}
 		}

@@ -470,7 +470,7 @@ func filterPendings(start state.State, pendingMessages []messagepb.Message, end 
 }
 
 func ExplorePaths(start state.State, pendingMessages []messagepb.Message, end messagepb.Message, connections []uint64, valid_indices []uint64) []Start {
-	fmt.Printf("-------------------------start to explore paths--------------------------------- message: %+v pending messages: %+v\n", end.Type, len(pendingMessages))
+	// fmt.Printf("-------------------------start to explore paths--------------------------------- message: %+v pending messages: %+v\n", end.Type, len(pendingMessages))
 	s := make([]*node, 0)
 	s = append(s, &node{s: start})
 	paths := make([]Path, 0)
@@ -483,7 +483,7 @@ func ExplorePaths(start state.State, pendingMessages []messagepb.Message, end me
 	counter := 0
 	TraverseAllMinimumPaths(start, end_s, pendingMessages, fp, path, &paths, &counter)
 
-	fmt.Printf("find the minimum paths ended: %+v counter: %+v.\n", len(paths), counter)
+	fmt.Printf("find the minimum paths ended: %+v counter: %+v, filtered message: %+v\n", len(paths), counter, len(fp))
 	result := make([]Start, 0)
 	for i := 0; i < len(paths); i++ {
 		p := paths[i].path
