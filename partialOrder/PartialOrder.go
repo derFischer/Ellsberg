@@ -4,8 +4,9 @@ import (
 	// "fmt"
 	// "fmt"
 
+	// "fmt"
+
 	"fmt"
-	"math"
 	"reflect"
 
 	"go.etcd.io/etcd/v3/messagepb"
@@ -17,6 +18,10 @@ import (
 var checkLeaderEvent messagepb.Message = messagepb.Message{Type: messagepb.CheckLeader}
 var checkCommitIndex messagepb.Message = messagepb.Message{Type: messagepb.CheckCommitIndex}
 var timeout messagepb.Message = messagepb.Message{Type: messagepb.Timeout}
+
+var CHECKLEADER int = -1
+var CHECKCOMMITINDEX int = -2
+var TIMEOUT int = -3
 
 type Msg struct {
 	msg     messagepb.Message
@@ -36,10 +41,7 @@ type Start struct {
 }
 
 type Path struct {
-	state    state.State
-	path     []messagepb.Message
-	pendings []messagepb.Message
-	test     []int
+	path []int
 }
 
 type EndState struct {
@@ -132,40 +134,28 @@ func Drop(msg messagepb.Message, s state.State) bool {
 	}
 }
 
-func pendingGC(p []messagepb.Message, s state.State, rm_index int, in []int) ([]messagepb.Message, []int) {
-	// fmt.Printf("pendinggc: p: %+v, rm: %+v, in: %+v\n", p, rm_index, in)
+func pendingGC(pending []messagepb.Message, s state.State, in []int) []int {
+	// //fmt.Printf("pendinggc: p: %+v, rm: %+v, in: %+v\n", p, rm_index, in)
 	// debug.PrintStack()
-	pending := make([]messagepb.Message, len(p))
-	copy(pending, p)
 	index := make([]int, len(in))
 	copy(index, in)
-
-	for i := 0; i < len(in); i++ {
-		if index[i] > rm_index {
-			index[i] = index[i] - 1
-		}
-	}
 
 	for i := 0; i < len(pending); i++ {
 		if Drop(pending[i], s) {
 			// if pending[i].Type != messagepb.RaftRequest && pending[i].Type != messagepb.RaftResp {
-			// 	fmt.Printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!drop the message: %+v based on state: %+v\n\n\n", pending[i], s)
+			// 	//fmt.Printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!drop the message: %+v based on state: %+v\n\n\n", pending[i], s)
 			// }
-			pending = append(pending[:i], pending[i+1:]...)
 			for j := 0; j < len(index); j++ {
 				if i == index[j] {
 					index = append(index[:j], index[j+1:]...)
-					j = j - 1
-					continue
-				} else if i < index[j] {
-					index[j] = index[j] - 1
+					break
 				}
 			}
-			i = i - 1
+			// i = i - 1
 		}
 	}
 
-	return pending, index
+	return index
 }
 
 func PickOneEnabledMsg(s state.State, end_s EndState, pendingMessages []messagepb.Message) (bool, messagepb.Message) {
@@ -178,38 +168,40 @@ func PickOneEnabledMsg(s state.State, end_s EndState, pendingMessages []messagep
 	return false, messagepb.Message{}
 }
 
-func subPath(p1 []messagepb.Message, p2 []messagepb.Message) (bool, bool) {
+func subPath(p1 []int, p2 []int) (bool, bool) {
 
 	if len(p1) < len(p2) {
-		j := 0
-		for i := 0; i < len(p1); i++ {
-			found := false
-			for ; j < len(p2); j++ {
-				if reflect.DeepEqual(p1[i], p2[j]) {
-					found = true
-					continue
-				}
-			}
-			if !found {
-				return false, true
+		if len(p1) != len(p2)-1 {
+			return false, false
+		}
+		i := 0
+		for ; i < len(p1); i++ {
+			if p1[i] != p2[i] {
+				break
 			}
 		}
-		return true, true
-	} else {
-		j := 0
-		for i := 0; i < len(p2); i++ {
-			found := false
-			for ; j < len(p1); j++ {
-				if reflect.DeepEqual(p2[i], p1[j]) {
-					found = true
-					continue
-				}
-			}
-			if !found {
+		for ; i < len(p1); i++ {
+			if p1[i] != p2[i+1] {
 				return false, false
 			}
 		}
 		return true, false
+	} else {
+		if len(p2) != len(p1)-1 {
+			return false, false
+		}
+		i := 0
+		for ; i < len(p2); i++ {
+			if p2[i] != p1[i] {
+				break
+			}
+		}
+		for ; i < len(p2); i++ {
+			if p2[i] != p1[i+1] {
+				return false, false
+			}
+		}
+		return true, true
 	}
 }
 
@@ -235,33 +227,24 @@ func append_check_minimum(paths *[]Path, p Path) {
 	// *paths = append(*paths, p)
 }
 
-func TraverseAllMinimumPaths(start_s state.State, end_s EndState, position int, current_msg messagepb.Message, pendings []messagepb.Message, v_index []int, p []messagepb.Message, paths *[]Path, round *int, counter *int, p_t []int) {
-	// fmt.Printf("the length of the pending message: %+v\n valid index: %+v\n", len(pendings), v_index)
-	*round = *round + 1
-	s, matched := matched(start_s, end_s)
+func TraverseAllMinimumPaths(start_s state.State, end_s EndState, pendings []messagepb.Message, v_index []int, p []int, paths *[]Path, counter *int) {
+	// //fmt.Printf("the length of the pending message: %+v\n valid index: %+v\n", len(pendings), v_index)
+	// //fmt.Printf("in search.... start: %+v\n end: %+v\n path: %+v\n valid index: %+v\n", start_s, end_s, p, v_index)
+	_, matched := matched(start_s, end_s)
+	*counter = *counter + 1
 	if matched {
-		pendings, _ := pendingGC(pendings, s, math.MaxInt32, make([]int, 0))
+		// pendings, _ := pendingGC(pendings, s, math.MaxInt32, make([]int, 0))
 		// append_check_minimum(paths, Path{state: s, path: p, pendings: pendings})
-		append_check_minimum(paths, Path{state: s, path: p, pendings: pendings, test: p_t})
+		append_check_minimum(paths, Path{path: p})
 		return
 	}
 
 	for i := 0; i < len(v_index); i++ {
 		index := v_index[i]
-		if index < position {
-			if !dependent(pendings[index], current_msg) {
-				continue
-			}
-		}
-		pendingMessages := make([]messagepb.Message, len(pendings))
-		copy(pendingMessages, pendings)
-
 		valid_index := make([]int, len(v_index))
 		copy(valid_index, v_index)
 
-		*counter = *counter + 1
-
-		m := pendingMessages[index]
+		m := pendings[index]
 		msg_enabled, next, s_next := enabled(start_s, m, end_s)
 		if msg_enabled {
 			if !next {
@@ -270,83 +253,74 @@ func TraverseAllMinimumPaths(start_s state.State, end_s EndState, position int, 
 			if reflect.DeepEqual(s_next, start_s) {
 				continue
 			}
-			path := make([]messagepb.Message, len(p))
+			path := make([]int, len(p))
 			copy(path, p)
-			pending, in := pendingGC(append(pendingMessages[0:index], pendingMessages[index+1:]...), s_next, index, append(valid_index[0:i], valid_index[i+1:]...))
-			p_t_t := make([]int, len(p_t))
-			copy(p_t_t, p_t)
-			TraverseAllMinimumPaths(s_next, end_s, i, pendingMessages[index], pending, in, append(path, m), paths, round, counter, append(p_t_t, index))
+			in := pendingGC(pendings, s_next, append(valid_index[0:i], valid_index[i+1:]...))
+			TraverseAllMinimumPaths(s_next, end_s, pendings, in, append(path, index), paths, counter)
 		}
 	}
 
-	// fmt.Printf("nil event traverse all Starts: start state: %+v\n", start_s)
+	//fmt.Printf("nil event traverse all Starts: start state: %+v\n", start_s)
 	//nil events check:
 	msg_enabled, next, s_next := enabled(start_s, checkLeaderEvent, end_s)
+	//fmt.Printf("checkleader enabled: %+v\n", msg_enabled)
 	if msg_enabled {
 		if !next {
 			s_next, _ = Apply(start_s, checkLeaderEvent)
 		}
 		if !reflect.DeepEqual(s_next, start_s) {
-			pendingMessages := make([]messagepb.Message, len(pendings))
-			copy(pendingMessages, pendings)
-			valid_index := make([]int, len(v_index))
-			copy(valid_index, v_index)
-			path := make([]messagepb.Message, len(p))
+			path := make([]int, len(p))
 			copy(path, p)
-			pendings, in := pendingGC(pendingMessages, s_next, math.MaxInt32, valid_index)
-			p_t_t := make([]int, len(p_t))
-			copy(p_t_t, p_t)
-			TraverseAllMinimumPaths(s_next, end_s, position, current_msg, pendings, in, append(path, checkLeaderEvent), paths, round, counter, append(p_t_t, -1))
+			//fmt.Printf("check leader continue... start pending gc\n")
+			in := pendingGC(pendings, s_next, v_index)
+			//fmt.Printf("pending gc finishes\n")
+			TraverseAllMinimumPaths(s_next, end_s, pendings, in, append(path, CHECKLEADER), paths, counter)
 		}
 	}
 
 	msg_enabled, next, s_next = enabled(start_s, checkCommitIndex, end_s)
+	//fmt.Printf("checkcommitindex enabled: %+v\n", msg_enabled)
 	if msg_enabled {
 		if !next {
 			s_next, _ = Apply(start_s, checkCommitIndex)
 		}
 		if !reflect.DeepEqual(s_next, start_s) {
-			pendingMessages := make([]messagepb.Message, len(pendings))
-			copy(pendingMessages, pendings)
-			valid_index := make([]int, len(v_index))
-			copy(valid_index, v_index)
-			path := make([]messagepb.Message, len(p))
+			path := make([]int, len(p))
 			copy(path, p)
-			pendings, in := pendingGC(pendingMessages, s_next, math.MaxInt32, valid_index)
-			p_t_t := make([]int, len(p_t))
-			copy(p_t_t, p_t)
-			TraverseAllMinimumPaths(s_next, end_s, position, current_msg, pendings, in, append(path, checkCommitIndex), paths, round, counter, append(p_t_t, -2))
+			in := pendingGC(pendings, s_next, v_index)
+			TraverseAllMinimumPaths(s_next, end_s, pendings, in, append(path, CHECKCOMMITINDEX), paths, counter)
 		}
 	}
 
 	msg_enabled, next, s_next = enabled(start_s, timeout, end_s)
+	//fmt.Printf("timeout enabled: %+v\n", msg_enabled)
+
 	if msg_enabled {
 		if !next {
 			s_next, _ = Apply(start_s, timeout)
 		}
 		if !reflect.DeepEqual(s_next, start_s) {
-			pendingMessages := make([]messagepb.Message, len(pendings))
-			copy(pendingMessages, pendings)
-			valid_index := make([]int, len(v_index))
-			copy(valid_index, v_index)
-			path := make([]messagepb.Message, len(p))
+			path := make([]int, len(p))
 			copy(path, p)
-			p_t_t := make([]int, len(p_t))
-			copy(p_t_t, p_t)
-			pendings, in := pendingGC(pendingMessages, s_next, math.MaxInt32, valid_index)
-			TraverseAllMinimumPaths(s_next, end_s, position, current_msg, pendings, in, append(path, timeout), paths, round, counter, append(p_t_t, -3))
+			in := pendingGC(pendings, s_next, v_index)
+			TraverseAllMinimumPaths(s_next, end_s, pendings, in, append(path, TIMEOUT), paths, counter)
 		}
 	}
 
 }
 
-func append_check_equivalence(result *[]Start, s Start) {
+func append_check_equivalence(result *[]Start, s state.State, pendingMessages []messagepb.Message, v_index []int) {
+	remaining_pendings := make([]messagepb.Message, 0)
+	for i := 0; i < len(v_index); i++ {
+		remaining_pendings = append(remaining_pendings, pendingMessages[v_index[i]])
+	}
+
 	for i := 0; i < len(*result); i++ {
-		if reflect.DeepEqual((*result)[i], s) {
+		if reflect.DeepEqual(Start{States: s, Remaining_pending: remaining_pendings}, (*result)[i]) {
 			return
 		}
 	}
-	*result = append(*result, s)
+	*result = append(*result, Start{States: s, Remaining_pending: remaining_pendings})
 }
 
 // func ExploreTest(s state.State, minimumPath []messagepb.Message, end_s EndState, pendingMessages []messagepb.Message, result *[]Start) {
@@ -358,57 +332,92 @@ func append_check_equivalence(result *[]Start, s Start) {
 // 	append_check_equivalence(result, Start{States: s, Remaining_pending: pendingMessages})
 // }
 
-func ExploreTest(path Path, result *[]Start) {
+func ExploreTest(path []int, start state.State, result *[]Start, p []messagepb.Message, e EndState) {
 	// current_state := CopyState(s)
 	// for i := 0; i < len(minimumPath); i++ {
 	// 	current_state, _ = Apply(current_state, minimumPath[i])
 	// }
 	// current_state, _ = matched(current_state, end_s)
-	append_check_equivalence(result, Start{States: path.state, Remaining_pending: path.pendings})
+	// fmt.Printf("-----------------explore test final state start--------------- state: %+v path: %+v\n", start, path)
+	for i := 0; i < len(path); i++ {
+		index := path[i]
+		start, _ = Apply(start, fetchMessage(p, index))
+	}
+	start, _ = matched(start, e)
+	valid_index := make([]int, 0)
+	for i := 0; i < len(p); i++ {
+		found := false
+		for j := 0; j < len(path); j++ {
+			if i == path[j] {
+				found = true
+			}
+		}
+		if !found {
+			valid_index = append(valid_index, i)
+		}
+	}
+
+	in := pendingGC(p, start, valid_index)
+	// fmt.Printf("-----------------explore test final state--------------- state: %+v path: %+v\n", start, path)
+	// remaining_pendings := make([]messagepb.Message, 0)
+
+	// for i := 0; i < len(p); i++ {
+	// 	for j := 0; j < len(in); j++ {
+	// 		if i == in[j] {
+	// 			remaining_pendings = append(remaining_pendings, p[i])
+	// 			break
+	// 		}
+	// 	}
+	// }
+	append_check_equivalence(result, start, p, in)
 }
 
-func Explore(s state.State, minimumPath []messagepb.Message, end_s EndState, pendingMessages []messagepb.Message, result *[]Start) {
+func Explore(s state.State, minimumPath []int, end_s EndState, pendingMessages []messagepb.Message, v_index []int, result *[]Start) {
 	current_state := CopyState(s)
 
 	if len(minimumPath) == 0 {
-		s, matched := matched(current_state, end_s)
+		final_state, matched := matched(current_state, end_s)
 		if matched {
-			append_check_equivalence(result, Start{States: s, Remaining_pending: pendingMessages})
+			in := pendingGC(pendingMessages, final_state, v_index)
+			append_check_equivalence(result, final_state, pendingMessages, in)
 		}
 		return
 	}
 
-	if len(pendingMessages) == 0 {
+	if len(v_index) == 0 {
 		s := current_state
 		for i := 0; i < len(minimumPath); i++ {
-			s, _ = Apply(s, minimumPath[i])
+			s, _ = Apply(s, fetchMessage(pendingMessages, minimumPath[i]))
 		}
 		final_state, matched := matched(s, end_s)
 		if matched {
-			append_check_equivalence(result, Start{States: final_state, Remaining_pending: pendingMessages})
+			in := pendingGC(pendingMessages, final_state, v_index)
+			append_check_equivalence(result, final_state, pendingMessages, in)
 		}
 		return
 	}
 
 	//cases: minimumpath and pendingmessages are not empty
-	minimumPathNextMessage := minimumPath[0]
-	for i := 0; i < len(pendingMessages); i++ {
-		msg := pendingMessages[i]
+	minimumPathNextMessage := fetchMessage(pendingMessages, minimumPath[0])
+	for i := 0; i < len(v_index); i++ {
+		msg := pendingMessages[v_index[i]]
 		if dependent(minimumPathNextMessage, msg) {
 			msg_enabled, next, s_next := enabled(current_state, msg, end_s)
 			if msg_enabled {
 				if !next {
 					s_next, _ = Apply(current_state, msg)
 				}
-				new_p := make([]messagepb.Message, len(pendingMessages))
-				copy(new_p, pendingMessages)
-				Explore(s_next, minimumPath, end_s, append(new_p[:i], new_p[i+1:]...), result)
+				valid_index := make([]int, len(v_index))
+				copy(valid_index, v_index)
+				in := pendingGC(pendingMessages, s_next, append(valid_index[:i], valid_index[i+1:]...))
+				Explore(s_next, minimumPath, end_s, pendingMessages, in, result)
 			}
 		}
 	}
 
-	s_next, _ := Apply(current_state, minimumPath[0])
-	Explore(s_next, minimumPath[1:], end_s, pendingMessages, result)
+	s_next, _ := Apply(current_state, minimumPathNextMessage)
+	in := pendingGC(pendingMessages, s_next, v_index)
+	Explore(s_next, minimumPath[1:], end_s, pendingMessages, in, result)
 }
 
 func filterPendings(start state.State, pendingMessages []messagepb.Message, end interface{}) []int {
@@ -461,31 +470,36 @@ func filterPendings(start state.State, pendingMessages []messagepb.Message, end 
 }
 
 func ExplorePaths(start state.State, pendingMessages []messagepb.Message, end messagepb.Message, connections []uint64, valid_indices []uint64) []Start {
-	// fmt.Printf("explore Start from state: %+v\n to state: %+v, pendings: %+v\n ", start, end, pendingMessages)
+	fmt.Printf("-------------------------start to explore paths--------------------------------- message: %+v pending messages: %+v\n", end.Type, len(pendingMessages))
 	s := make([]*node, 0)
 	s = append(s, &node{s: start})
 	paths := make([]Path, 0)
-	path := make([]messagepb.Message, 0)
-	p_t := make([]int, 0)
+	path := make([]int, 0)
 	e, req := Inference(end)
 
-	round := 0
-	counter := 0
 	fp := filterPendings(start, pendingMessages, e)
-	// fmt.Printf("the length of pending messgages: %+v\n fp: %+v\n", len(pendingMessages), fp)
+	//fmt.Printf("filtered messages: %+v\n", fp)
 	end_s := EndState{End: e, Req: req, Connections: connections, Valid_indice: valid_indices}
-	TraverseAllMinimumPaths(start, end_s, 0, messagepb.Message{}, pendingMessages, fp, path, &paths, &round, &counter, p_t)
-	// fmt.Printf("minimum paths found for the transition: %+v\n", paths)
-	fmt.Printf("find the minimum paths ended: %+v.\n", len(paths))
+	counter := 0
+	TraverseAllMinimumPaths(start, end_s, pendingMessages, fp, path, &paths, &counter)
+
+	fmt.Printf("find the minimum paths ended: %+v counter: %+v.\n", len(paths), counter)
 	result := make([]Start, 0)
 	for i := 0; i < len(paths); i++ {
-		// Explore(start, paths[i].path, end_s, paths[i].pendings, &result)
-		// ExploreTest(start, paths[i].path, end_s, paths[i].pendings, &result)
-		ExploreTest(paths[i], &result)
+		p := paths[i].path
+		remaining_pendings := make([]int, 0)
+		for j := 0; j < len(pendingMessages); j++ {
+			for k := 0; k < len(p); k++ {
+				if j == p[k] {
+					break
+				}
+			}
+			remaining_pendings = append(remaining_pendings, j)
+		}
+		// Explore(start, paths[i].path, end_s, pendingMessages, remaining_pendings, &result)
+		ExploreTest(p, start, &result, pendingMessages, end_s)
 	}
-	// fmt.Printf("explore from the minimum path ended.\n")
-	// fmt.Printf("paths found for the transition: %+v\n", len(result))
-
+	//fmt.Printf("------------------------explore paths end-------------------------------")
 	return result
 }
 

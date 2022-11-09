@@ -322,6 +322,8 @@ func (s *State) HackEntries(entries []statepb.Command) {
 			if s.GetLastCommandIndex() == cmd.CommandIndex-1 {
 				s.Log = append(s.Log, cmd)
 				continue
+			} else {
+				s.Log = append(s.Log, statepb.Command{CommandTerm: s.GetLastCommandTerm(), CommandIndex: s.GetLastCommandIndex() + 1})
 			}
 		} else {
 			local_index := s.GetCurrentIndex(cmd.CommandIndex)

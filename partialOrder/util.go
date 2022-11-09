@@ -1,6 +1,7 @@
 package partialOrder
 
 import (
+	"fmt"
 	"log"
 	"math"
 	"reflect"
@@ -255,10 +256,14 @@ func PartialStateMatched(ps state.PartialState, st state.State) (state.State, bo
 		// }
 	} else if ps.State == statepb.Leader {
 		//hack:
+		if !StateMatch(s, ps) {
+			return s, false
+		}
 		if ps.Log != nil && len(ps.Log) != 0 {
 			last_index := ps.Log[len(ps.Log)-1].CommandIndex
 			if last_index <= 7 {
 				s.HackEntries(ps.Log)
+				fmt.Printf("----------------entering hack, after hack--------------------- %+v local state: %+v\n partial state %+v\n", StateMatch(s, ps) && TermMatch(s, ps), s, ps)
 				return s, StateMatch(s, ps) && TermMatch(s, ps)
 			}
 		}
@@ -302,6 +307,19 @@ func PartialStateMatched(ps state.PartialState, st state.State) (state.State, bo
 		return s, StateMatch(s, ps) && TermMatch(s, ps) && VotedForMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true) && CommitIndexMatch(s, ps)
 	}
 	return s, true
+}
+
+func fetchMessage(messageList []messagepb.Message, index int) messagepb.Message {
+	if index == CHECKCOMMITINDEX {
+		return checkCommitIndex
+	}
+	if index == CHECKLEADER {
+		return checkLeaderEvent
+	}
+	if index == TIMEOUT {
+		return timeout
+	}
+	return messageList[index]
 }
 
 // func PartialStateMatched(ps state.PartialState, st state.State) (state.State, bool) {
