@@ -315,11 +315,11 @@ func append_check_equivalence(result *[]Start, s state.State, pendingMessages []
 		remaining_pendings = append(remaining_pendings, pendingMessages[v_index[i]])
 	}
 
-	for i := 0; i < len(*result); i++ {
-		if reflect.DeepEqual(Start{States: s, Remaining_pending: remaining_pendings}, (*result)[i]) {
-			return
-		}
-	}
+	// for i := 0; i < len(*result); i++ {
+	// 	if reflect.DeepEqual(Start{States: s, Remaining_pending: remaining_pendings}, (*result)[i]) {
+	// 		return
+	// 	}
+	// }
 	*result = append(*result, Start{States: s, Remaining_pending: remaining_pendings})
 }
 

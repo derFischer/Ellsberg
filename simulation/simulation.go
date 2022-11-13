@@ -111,11 +111,11 @@ func (s *Simulation) sendMsg(message messagepb.Msg) {
 func (s *Simulation) receiveMsg(message messagepb.Msg) {
 	if message.Type == messagepb.ClientRequest {
 		if s.counter == 0 {
-			f, _ := createFile("", "cpuprofile.out")
+			f, _ := createFile("/root/", "cpuprofile.out")
 			startCPUProfile(f)
 		}
 		s.counter = s.counter + 1
-		if s.counter == 50 {
+		if s.counter == 40 {
 			stopCPUProfile()
 		}
 	}
