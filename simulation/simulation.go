@@ -1,9 +1,13 @@
 package simulation
 
 import (
+	"errors"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"reflect"
+	"runtime/pprof"
 	"sync"
 
 	"go.etcd.io/etcd/v3/messagepb"
@@ -44,6 +48,7 @@ type Simulation struct {
 	Connections map[messagepb.Ctx]Connection
 	ROReq       []ROEntry
 	ReadIndex   map[messagepb.Ctx]RIndex
+	counter     int
 }
 
 func StartSimulationServer(id uint64, peers []uint64) *Simulation {
@@ -74,6 +79,7 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	sl.ReadIndex = rindex
 
 	sl.ROReq = make([]ROEntry, 0)
+	sl.counter = 0
 
 	go func() {
 		for {
@@ -103,6 +109,16 @@ func (s *Simulation) sendMsg(message messagepb.Msg) {
 }
 
 func (s *Simulation) receiveMsg(message messagepb.Msg) {
+	if message.Type == messagepb.ClientRequest {
+		if s.counter == 0 {
+			f, _ := createFile("", "cpuprofile.out")
+			startCPUProfile(f)
+		}
+		s.counter = s.counter + 1
+		if s.counter == 50 {
+			stopCPUProfile()
+		}
+	}
 	msg, ctx := messagepb.MsgInterpreter(message)
 	// if msg.Type != messagepb.MsgAppResp {
 	// 	fmt.Printf("receive read index resp: %+v\n", msg)
@@ -307,6 +323,29 @@ func inSlice(s []uint64, e uint64) int {
 		}
 	}
 	return -1
+}
+
+func createFile(dir, name string) (*os.File, error) {
+	if dir == "" {
+		var err error
+		dir, err = os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+	}
+	path := filepath.Join(dir, name)
+	return os.Create(path)
+}
+
+func startCPUProfile(f *os.File) error {
+	if f == nil {
+		return errors.New("nil file")
+	}
+	return pprof.StartCPUProfile(f)
+}
+
+func stopCPUProfile() {
+	pprof.StopCPUProfile()
 }
 
 //debug function
