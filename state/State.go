@@ -41,7 +41,14 @@ func (s *State) ClientRequestHandler(args messagepb.Message) {
 	}
 
 	if s.State == statepb.Leader {
+		l := make([]statepb.Command, len(s.Log))
+		copy(l, s.Log)
+		s.Log = l
 		s.Log = append(s.Log, statepb.Command{CommandIndex: s.GetLastCommandIndex() + 1, CommandTerm: s.CurrentTerm, Command: statepb.Op{ReqID: args.ReqID, Type: t, Key: args.Key, Value: args.Value, Data: args.Data}})
+
+		m := make([]uint64, len(s.MmatchIndex))
+		copy(m, s.MmatchIndex)
+		s.MmatchIndex = m
 		s.MmatchIndex[inSlice(s.Peers, s.Me)] = s.GetLastCommandIndex()
 	}
 }
@@ -169,6 +176,9 @@ func (s *State) RequestVoteReplyHandler(reply messagepb.Message) {
 	s.UpdateTerm(reply.Mterm)
 
 	if reply.Success {
+		v := make([]bool, len(s.Votes))
+		copy(v, s.Votes)
+		s.Votes = v
 		s.ReceiveVotes(reply.From)
 	}
 	return
@@ -180,6 +190,9 @@ func (s *State) AppendEntryReplyHandler(reply messagepb.Message) {
 	}
 	s.UpdateTerm(reply.Mterm)
 	if reply.Success {
+		m := make([]uint64, len(s.MmatchIndex))
+		copy(m, s.MmatchIndex)
+		s.MmatchIndex = m
 		s.MmatchIndex[inSlice(s.Peers, reply.From)] = max(reply.MatchIndex, s.MmatchIndex[inSlice(s.Peers, reply.From)])
 		// s.updateCommitIndex()
 	}
@@ -239,6 +252,9 @@ func (s *State) Candidate(term uint64) {
 	s.State = statepb.Candidate
 	s.CurrentTerm = term
 	s.VotedFor = s.Me
+	v := make([]bool, len(s.Votes))
+	copy(v, s.Votes)
+	s.Votes = v
 	for i := 0; i < len(s.Peers); i++ {
 		s.Votes[i] = false
 	}
@@ -257,6 +273,10 @@ func (s *State) Follower() {
 func (s *State) Leader() {
 	var i int
 	s.State = statepb.Leader
+	m := make([]uint64, len(s.MmatchIndex))
+	copy(m, s.MmatchIndex)
+	s.MmatchIndex = m
+
 	for i = 0; i < len(s.Peers); i++ {
 		s.MmatchIndex[i] = 0
 	}
@@ -264,14 +284,66 @@ func (s *State) Leader() {
 }
 
 func (s *State) UpdateCommitIndex() {
-	s.MmatchIndex[inSlice(s.Peers, s.Me)] = s.GetLastCommandIndex()
-	majority := findMajority(s.MmatchIndex)
-	if majority > s.CommitIndex {
-		command := s.GetCommand(majority)
-		if command.CommandTerm == s.CurrentTerm {
-			s.CommitIndex = max(command.CommandIndex, s.CommitIndex)
+	if s.State == statepb.Leader {
+		m := make([]uint64, len(s.MmatchIndex))
+		copy(m, s.MmatchIndex)
+		s.MmatchIndex = m
+		s.MmatchIndex[inSlice(s.Peers, s.Me)] = s.GetLastCommandIndex()
+		majority := findMajority(s.MmatchIndex)
+		if majority > s.CommitIndex {
+			command := s.GetCommand(majority)
+			if command.CommandTerm == s.CurrentTerm {
+				s.CommitIndex = max(command.CommandIndex, s.CommitIndex)
+			}
 		}
 	}
+}
+
+func (s *State) Equal(s1 *State) bool {
+	if s.Me != s1.Me {
+		return false
+	}
+	if s.State != s1.State {
+		return false
+	}
+	if s.CurrentTerm != s1.CurrentTerm {
+		return false
+	}
+	if s.VotedFor != s1.VotedFor {
+		return false
+	}
+	if &(s.Log[0]) != &(s1.Log[0]) {
+		if len(s.Log) != len(s1.Log) {
+			return false
+		}
+		for i, v := range s.Log {
+			if !reflect.DeepEqual(v.Command.ReqID, s1.Log[i].Command.ReqID) {
+				return false
+			}
+		}
+		// if !reflect.DeepEqual(s.Log, s1.Log) {
+		// 	return false
+		// }
+	}
+	if s.CommitIndex != s1.CommitIndex {
+		return false
+	}
+
+	if s.State == statepb.Candidate {
+		if &(s.Votes[0]) != &(s1.Votes[0]) {
+			if !reflect.DeepEqual(s.Votes, s1.Votes) {
+				return false
+			}
+		}
+	}
+	if s.State == statepb.Leader {
+		if &(s.MmatchIndex[0]) != &(s1.MmatchIndex[0]) {
+			if !reflect.DeepEqual(s.MmatchIndex, s1.MmatchIndex) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (s *State) LogGC() {
@@ -313,6 +385,9 @@ func (s *State) SearchGet(r messagepb.Message) bool {
 
 //hack function
 func (s *State) HackEntries(entries []statepb.Command) {
+	l := make([]statepb.Command, len(s.Log))
+	copy(l, s.Log)
+	s.Log = l
 	for i := 0; i < len(entries); i++ {
 		cmd := entries[i]
 		if s.GetFirstCommandIndex() > cmd.CommandIndex {
@@ -433,6 +508,9 @@ func (s *State) entryInLog(args statepb.Op) (bool, statepb.Command) {
 }
 
 func (s *State) appendEntries(entries []statepb.Command) {
+	l := make([]statepb.Command, len(s.Log))
+	copy(l, s.Log)
+	s.Log = l
 	for _, command := range entries {
 		current_index := s.GetCurrentIndex(command.CommandIndex)
 		if current_index == TRUNCATED {

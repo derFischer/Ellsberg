@@ -440,11 +440,13 @@ func (r *raft) send(args interface{}, m pb.Message) {
 	}
 
 	if args == nil {
-		if m.Type != pb.MsgHeartbeat {
+		// if m.Type == pb.MsgHeartbeat || m.Type == pb.MsgApp || m.Type == pb.MsgVote || m.Type == pb.MsgReadIndex{
+		if m.Type == pb.MsgApp || m.Type == pb.MsgVote || m.Type == pb.MsgReadIndex {
 			messagepb.Sending(r.SLmsg, messagepb.Msg{Send: true, Type: messagepb.RaftRequest, Msg: messagepb.RaftMsg{Msg: m, Req: args}})
 		}
 	} else {
-		if m.Type != pb.MsgHeartbeatResp {
+		// if m.Type == pb.MsgHeartbeatResp || m.Type == pb.MsgAppResp || m.Type == pb.MsgVoteResp || m.Type == pb.MsgReadIndexResp {
+		if m.Type == pb.MsgAppResp || m.Type == pb.MsgVoteResp || m.Type == pb.MsgReadIndexResp {
 			messagepb.Sending(r.SLmsg, messagepb.Msg{Send: true, Type: messagepb.RaftResp, Msg: messagepb.RaftMsg{Msg: m, Req: args}})
 		}
 	}
@@ -1205,6 +1207,7 @@ func stepLeader(r *raft, m pb.Message) error {
 			}
 		}
 	case pb.MsgHeartbeatResp:
+		// fmt.Printf("leader receive heartbeat!!!! raft side!!!!\n")
 		pr.RecentActive = true
 		pr.ProbeSent = false
 

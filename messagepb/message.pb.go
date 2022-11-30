@@ -195,6 +195,7 @@ func RaftMsgInterpreter(message RaftMsg, send bool) (Message, Ctx) {
 		ctx := CtxInterpreter(msg.Context)
 		return Message{Type: MsgApp, From: msg.From, To: msg.To, Mterm: msg.Term, Index: 0, IndexTerm: 0, MEntries: []statepb.Command{}, CommitIndex: msg.Commit}, ctx
 	case raftpb.MsgHeartbeatResp:
+		// fmt.Printf("receive heartbeat message!!!\n")
 		if send {
 			ctx := CtxInterpreter(msg.Context)
 			req := message.Req.(raftpb.Message)

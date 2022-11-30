@@ -73,7 +73,7 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	sl := new(Simulation)
 	sl.me = id
 	sl.States = make([]partialOrder.Start, 1)
-	sl.States[0] = partialOrder.Start{States: state.State{Me: id, State: statepb.Follower, CurrentTerm: 1, VotedFor: state.NOONE, Votes: votes, Log: lg, CommitIndex: 3, MmatchIndex: matchIndex, Peers: peers}}
+	sl.States[0] = partialOrder.Start{States: &state.State{Me: id, State: statepb.Follower, CurrentTerm: 1, VotedFor: state.NOONE, Votes: votes, Log: lg, CommitIndex: 3, MmatchIndex: matchIndex, Peers: peers}}
 	sl.MsgCh = make(chan messagepb.Msg)
 	sl.Connections = alive
 	sl.ReadIndex = rindex
@@ -89,10 +89,14 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 				// 	log.Fatalf("This message is nil: %+v\n", msg)
 				// }
 				if msg.Send {
+					// fmt.Printf("trying to send message: %+v\n", msg)
 					sl.sendMsg(msg)
+					// fmt.Printf("send message check finished\n")
 				} else {
 					//fmt.Printf("!!!!!!!!!!!!!!!!receive the msg: %+v\n", msg)
+					// fmt.Printf("receive the message: %+v\n", msg)
 					sl.receiveMsg(msg)
+					// fmt.Printf("add the message finished\n")
 				}
 			}
 		}
@@ -105,7 +109,7 @@ func (s *Simulation) sendMsg(message messagepb.Msg) {
 	msg, ctx := messagepb.MsgInterpreter(message)
 	connected_peers, valid_indice := s.ROSendPreprocess(msg, ctx)
 	s.CheckMsg(msg, connected_peers, valid_indice)
-	// fmt.Printf("the states after sending the message: %+v\n\n\n", s.States)
+	fmt.Printf("the states after sending the message: %+v\n", len(s.States))
 }
 
 func (s *Simulation) receiveMsg(message messagepb.Msg) {
@@ -115,7 +119,7 @@ func (s *Simulation) receiveMsg(message messagepb.Msg) {
 			startCPUProfile(f)
 		}
 		s.counter = s.counter + 1
-		if s.counter == 40 {
+		if s.counter == 25 {
 			stopCPUProfile()
 		}
 	}
@@ -130,7 +134,7 @@ func (s *Simulation) receiveMsg(message messagepb.Msg) {
 func (s *Simulation) CheckMsg(msg messagepb.Message, connected_peers []uint64, valid_indice []uint64) {
 	tmp_state := make([]partialOrder.Start, 0)
 	for i := 0; i < len(s.States); i++ {
-		Starts := partialOrder.ExplorePaths(s.States[i].States, s.States[i].Remaining_pending, msg, connected_peers, valid_indice)
+		Starts := partialOrder.ExplorePaths(s.States[i].States, &s.States[i].Remaining_pending, msg, connected_peers, valid_indice)
 		tmp_state = append(tmp_state, Starts...)
 	}
 	if len(tmp_state) == 0 {
