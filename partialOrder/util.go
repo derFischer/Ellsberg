@@ -321,7 +321,7 @@ func PartialStateMatchedT(ps state.PartialState, st state.State) (state.State, b
 	return s, true
 }
 
-func fetchMessage(messageList *[]messagepb.Message, index int) messagepb.Message {
+func fetchMessage(messageList *[]*messagepb.Message, index int) messagepb.Message {
 	if index == CHECKCOMMITINDEX {
 		return checkCommitIndex
 	}
@@ -331,7 +331,7 @@ func fetchMessage(messageList *[]messagepb.Message, index int) messagepb.Message
 	if index == TIMEOUT {
 		return timeout
 	}
-	return (*messageList)[index]
+	return *(*messageList)[index]
 }
 
 // func PartialStateMatched(ps state.PartialState, st state.State) (state.State, bool) {

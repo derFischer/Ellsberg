@@ -43,7 +43,7 @@ type RIndex struct {
 type Simulation struct {
 	mu          sync.Mutex // Lock to protect shared access to this peer's state
 	me          uint64
-	States      []partialOrder.Start
+	States      []*partialOrder.Start
 	MsgCh       chan messagepb.Msg
 	Connections map[messagepb.Ctx]Connection
 	ROReq       []ROEntry
@@ -72,8 +72,8 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 
 	sl := new(Simulation)
 	sl.me = id
-	sl.States = make([]partialOrder.Start, 1)
-	sl.States[0] = partialOrder.Start{States: &state.State{Me: id, State: statepb.Follower, CurrentTerm: 1, VotedFor: state.NOONE, Votes: votes, Log: lg, CommitIndex: 3, MmatchIndex: matchIndex, Peers: peers}}
+	sl.States = make([]*partialOrder.Start, 1)
+	sl.States[0] = &partialOrder.Start{States: &state.State{Me: id, State: statepb.Follower, CurrentTerm: 1, VotedFor: state.NOONE, Votes: votes, Log: lg, CommitIndex: 3, MmatchIndex: matchIndex, Peers: peers}}
 	sl.MsgCh = make(chan messagepb.Msg)
 	sl.Connections = alive
 	sl.ReadIndex = rindex
@@ -132,10 +132,12 @@ func (s *Simulation) receiveMsg(message messagepb.Msg) {
 }
 
 func (s *Simulation) CheckMsg(msg messagepb.Message, connected_peers []uint64, valid_indice []uint64) {
-	tmp_state := make([]partialOrder.Start, 0)
+	tmp_state := make([]*partialOrder.Start, 0)
 	for i := 0; i < len(s.States); i++ {
 		Starts := partialOrder.ExplorePaths(s.States[i].States, &s.States[i].Remaining_pending, msg, connected_peers, valid_indice)
-		tmp_state = append(tmp_state, Starts...)
+		for _, sh := range *Starts {
+			append_check_equivalence(sh, &tmp_state)
+		}
 	}
 	if len(tmp_state) == 0 {
 		// fmt.Printf("No valid states for this message. The message: %+v\n ", msg)
@@ -156,7 +158,7 @@ func (s *Simulation) AddPendings(msg messagepb.Message) {
 		}
 		// t, m, _ := messagepb.MsgInterpreter(msg)
 		// fmt.Printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!add %+v %v to pendings\n\n\n", t, m)
-		s.States[i].Remaining_pending = append(s.States[i].Remaining_pending, msg)
+		s.States[i].Remaining_pending = append(s.States[i].Remaining_pending, &msg)
 	}
 }
 
@@ -267,6 +269,96 @@ func (s *Simulation) ConnectionGC() {
 	}
 }
 
+func pointer_slice_included(s1 *[]*messagepb.Message, s2 *[]*messagepb.Message) int {
+	r1 := make([]*messagepb.Message, len(*s1))
+	r2 := make([]*messagepb.Message, len(*s2))
+	copy(r1, *s1)
+	copy(r2, *s2)
+	if len(r1) < len(r2) {
+		for _, v1 := range r1 {
+			found := false
+			for i := 0; i < len(r2); i++ {
+				v2 := r2[i]
+				if v2 == v1 {
+					found = true
+
+					if i == len(r2)-1 {
+						r2 = r2[:i]
+					} else {
+						r2 = append(r2[:i], r2[i+1:]...)
+					}
+					break
+				}
+			}
+			if !found {
+				return -1
+			}
+		}
+		return 2
+	} else {
+		for _, v2 := range r2 {
+			found := false
+			for i := 0; i < len(r1); i++ {
+				v1 := r1[i]
+				if v2 == v1 {
+					found = true
+
+					if i == len(r1)-1 {
+						r1 = r1[:i]
+					} else {
+						r1 = append(r1[:i], r1[i+1:]...)
+					}
+					break
+				}
+			}
+			if !found {
+				return -1
+			}
+		}
+		return 1
+	}
+}
+
+func path_included(s1 *partialOrder.Start, s2 *partialOrder.Start) int {
+	if !s1.States.Equal(s2.States) {
+		return -1
+	}
+	return pointer_slice_included(&s1.Remaining_pending, &s2.Remaining_pending)
+}
+
+func append_check_equivalence(s1 *partialOrder.Start, result *[]*partialOrder.Start) {
+	for i := 0; i < len(*result); i++ {
+		pos := path_included(s1, ((*result)[i]))
+		if pos == 2 {
+			return
+		}
+		if pos == 1 {
+			if i == len(*result)-1 {
+				*result = (*result)[:i]
+			} else {
+				*result = append((*result)[:i], (*result)[i+1:]...)
+			}
+			i = i - 1
+		}
+	}
+	*result = append(*result, s1)
+}
+
+func convert_to_start(result *[]partialOrder.Start_helper, pendingmessages *[]*messagepb.Message) *[]partialOrder.Start {
+	r := make([]partialOrder.Start, 0)
+	for _, sh := range *result {
+		pm := make([]*messagepb.Message, 0)
+		for _, idx := range sh.Remaining_pending {
+			if idx == partialOrder.CHECKCOMMITINDEX || idx == partialOrder.CHECKLEADER || idx == partialOrder.TIMEOUT {
+				continue
+			}
+			pm = append(pm, (*pendingmessages)[idx])
+		}
+		r = append(r, partialOrder.Start{States: sh.States, Remaining_pending: pm})
+	}
+	return &r
+}
+
 //helper function
 func (s *Simulation) searchConnection(ctx messagepb.Ctx, add bool, ref int) bool {
 	_, exists := s.Connections[ctx]
@@ -372,6 +464,6 @@ func dumpStart(Start partialOrder.Start) {
 func (s *Simulation) dump() {
 	fmt.Printf("-----------------------------------------------states size is %+v--------------------------------------------------\n\n", len(s.States))
 	for i := 0; i < len(s.States); i++ {
-		dumpStart(s.States[i])
+		dumpStart(*s.States[i])
 	}
 }

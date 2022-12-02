@@ -440,8 +440,8 @@ func (r *raft) send(args interface{}, m pb.Message) {
 	}
 
 	if args == nil {
-		// if m.Type == pb.MsgHeartbeat || m.Type == pb.MsgApp || m.Type == pb.MsgVote || m.Type == pb.MsgReadIndex{
-		if m.Type == pb.MsgApp || m.Type == pb.MsgVote || m.Type == pb.MsgReadIndex {
+		if m.Type == pb.MsgHeartbeat || m.Type == pb.MsgApp || m.Type == pb.MsgVote || m.Type == pb.MsgReadIndex {
+			// if m.Type == pb.MsgApp || m.Type == pb.MsgVote || m.Type == pb.MsgReadIndex {
 			messagepb.Sending(r.SLmsg, messagepb.Msg{Send: true, Type: messagepb.RaftRequest, Msg: messagepb.RaftMsg{Msg: m, Req: args}})
 		}
 	} else {
