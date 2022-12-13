@@ -109,7 +109,7 @@ func (s *Simulation) sendMsg(message messagepb.Msg) {
 	msg, ctx := messagepb.MsgInterpreter(message)
 	connected_peers, valid_indice := s.ROSendPreprocess(msg, ctx)
 	s.CheckMsg(msg, connected_peers, valid_indice)
-	fmt.Printf("the states after sending the message: %+v\n", len(s.States))
+	// fmt.Printf("the states after sending the message: %+v, message type: %+v\n", len(s.States), msg.Type)
 }
 
 func (s *Simulation) receiveMsg(message messagepb.Msg) {
@@ -144,6 +144,7 @@ func (s *Simulation) CheckMsg(msg messagepb.Message, connected_peers []uint64, v
 		// s.dump()
 		log.Fatalf("No valid states for this message: %+v\n", msg)
 	}
+	// fmt.Printf("all states are: %+v\n", tmp_state)
 	s.States = tmp_state
 }
 
@@ -320,11 +321,31 @@ func pointer_slice_included(s1 *[]*messagepb.Message, s2 *[]*messagepb.Message) 
 }
 
 func path_included(s1 *partialOrder.Start, s2 *partialOrder.Start) int {
-	if !s1.States.Equal(s2.States) {
+	if !s1.States.EqualPrint(s2.States) {
 		return -1
 	}
+
 	return pointer_slice_included(&s1.Remaining_pending, &s2.Remaining_pending)
 }
+
+// func path_included(s1 *partialOrder.Start, s2 *partialOrder.Start) int {
+// 	state_equal := s1.States.EqualInclude(s2.States)
+// 	if state_equal == -1 {
+// 		return -1
+// 	}
+// 	path_equal := pointer_slice_included(&s1.Remaining_pending, &s2.Remaining_pending)
+// 	if path_equal == -1 {
+// 		return -1
+// 	}
+
+// 	if state_equal == 3 {
+// 		return path_equal
+// 	}
+// 	if state_equal != path_equal {
+// 		return -1
+// 	}
+// 	return path_equal
+// }
 
 func append_check_equivalence(s1 *partialOrder.Start, result *[]*partialOrder.Start) {
 	for i := 0; i < len(*result); i++ {
@@ -341,6 +362,7 @@ func append_check_equivalence(s1 *partialOrder.Start, result *[]*partialOrder.St
 			i = i - 1
 		}
 	}
+	// fmt.Printf("new state! %+v\n", *(s1.States))
 	*result = append(*result, s1)
 }
 

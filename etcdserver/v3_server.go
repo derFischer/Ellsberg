@@ -615,15 +615,15 @@ func (s *EtcdServer) raftRequestOnce(ctx context.Context, r pb.InternalRaftReque
 	if result.err != nil {
 		return nil, result.err
 	}
-	if startTime, ok := ctx.Value(traceutil.StartTimeKey).(time.Time); ok && result.trace != nil {
-		applyStart := result.trace.GetStartTime()
-		// The trace object is created in apply. Here reset the start time to trace
-		// the raft request time by the difference between the request start time
-		// and apply start time
-		result.trace.SetStartTime(startTime)
-		result.trace.InsertStep(0, applyStart, "process raft request")
-		result.trace.LogIfLong(traceThreshold)
-	}
+	// if startTime, ok := ctx.Value(traceutil.StartTimeKey).(time.Time); ok && result.trace != nil {
+	// applyStart := result.trace.GetStartTime()
+	// The trace object is created in apply. Here reset the start time to trace
+	// the raft request time by the difference between the request start time
+	// and apply start time
+	// result.trace.SetStartTime(startTime)
+	// result.trace.InsertStep(0, applyStart, "process raft request")
+	// result.trace.LogIfLong(traceThreshold)
+	// }
 	return result.resp, nil
 }
 

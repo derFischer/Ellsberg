@@ -9,6 +9,7 @@ import (
 	// "fmt"
 	// "fmt"
 	"fmt"
+	"log"
 	"reflect"
 
 	"go.etcd.io/etcd/v3/messagepb"
@@ -25,9 +26,17 @@ var CHECKLEADER int = -1
 var CHECKCOMMITINDEX int = -2
 var TIMEOUT int = -3
 
+const NIL_EVENTS = 3
+
+var nil_events = [NIL_EVENTS]int{-1, -2, -3}
+
+// var nil_events = [NIL_EVENTS]int{}
+
 type Pendings struct {
 	pendingMessages []int
 	explored        []bool
+	// nil_events      []int
+	// nil_explored    []bool
 }
 
 type Start struct {
@@ -44,6 +53,8 @@ type Start_helper struct {
 type Visited struct {
 	s        *state.State
 	pendings []Pendings
+	// nil_events     []int
+	nil_events_pos int
 }
 
 type EndState struct {
@@ -55,11 +66,15 @@ type EndState struct {
 
 func (v *Visited) addPendings(idx []Pendings) {
 	for _, p := range idx {
+		if len(p.pendingMessages) == 0 {
+			continue
+		}
+		found := false
 		for i := 0; i < len(v.pendings); i++ {
 			vp := v.pendings[i]
 			pos := int_slice_included(&vp.pendingMessages, &p.pendingMessages)
 			if pos == 1 {
-				return
+				found = true
 			}
 			if pos == 2 {
 				if i == len(v.pendings)-1 {
@@ -68,6 +83,9 @@ func (v *Visited) addPendings(idx []Pendings) {
 					v.pendings = append(v.pendings[:i], v.pendings[i+1:]...)
 				}
 			}
+		}
+		if found {
+			continue
 		}
 		explored := make([]bool, len(p.pendingMessages))
 		for i, _ := range explored {
@@ -81,16 +99,23 @@ func (v *Visited) addPendings(idx []Pendings) {
 
 func (v *Visited) fetchOne() (bool, int, []Pendings) {
 	// fmt.Printf("enter fetch one: the remaining msg in the node: %+v\n", v)
+	if v.nil_events_pos < NIL_EVENTS {
+		v.nil_events_pos = v.nil_events_pos + 1
+		return true, nil_events[v.nil_events_pos-1], v.pendings
+	}
 	if len(v.pendings) == 0 {
 		return false, -1, nil
 	}
 	pendings := v.pendings[0].pendingMessages
-	idx := 0
+	idx := -1
 	for i, e := range v.pendings[0].explored {
 		if e == false {
 			idx = i
 			break
 		}
+	}
+	if idx == -1 {
+		log.Fatalf("the pending list shouldn't be all explored.\n")
 	}
 	result := pendings[idx]
 	result_p := make([]Pendings, 0)
@@ -118,6 +143,9 @@ func (v *Visited) fetchOne() (bool, int, []Pendings) {
 
 	//clean the pending message list if all have been explored
 	for i := 0; i < len(v.pendings); i++ {
+		// if len(v.pendings[i].explored) != len(v.pendings[i].pendingMessages) {
+		// 	log.Fatalf("pendingmessages: %+v, explored: %+v\n", v.pendings[i].pendingMessages, v.pendings[i].explored)
+		// }
 		pe := v.pendings[i].explored
 		all_explored := true
 		for _, explored := range pe {
@@ -254,15 +282,15 @@ func subPath(p1 []int, p2 []int) (bool, bool) {
 	}
 }
 
-func ExploreFromNode(visited *[](*Visited), pendingMessages *[]*messagepb.Message, end_s *EndState, result *[]*Start_helper, counter *int) {
+func ExploreFromNode(visited *[](*Visited), pendingMessages *[]*messagepb.Message, end_s *EndState, result *[]*Start_helper, counter *int, states_counter *int) {
 	// fmt.Printf("the current visited nodes:\n")
 	// for _, n := range *visited {
 	// 	fmt.Printf("%+v\n", *n)
 	// }
 	// fmt.Printf("---------------------------------")
 	node := (*visited)[0]
-	fmt.Printf("--------------------------start to explore from the node:--------------------------\n")
-	fmt.Printf("%+v\n%+v\n", node, *node.s)
+	// fmt.Printf("--------------------------start to explore from the node:--------------------------\n")
+	// fmt.Printf("%+v\n%+v\n", node, *node.s)
 	// if node.finished {
 	// 	return false
 	// }
@@ -279,11 +307,17 @@ func ExploreFromNode(visited *[](*Visited), pendingMessages *[]*messagepb.Messag
 	if reached {
 		// fmt.Printf("------------------reach the end, states: ---------------------\n")
 		// fmt.Printf("%+v\n", s)
-		for _, p := range node.pendings {
-			// append_check_equivalence(&Start_helper{States: node.s, Remaining_pending: p.pendingMessages}, &result)
-			*result = append(*result, &Start_helper{States: &s, Remaining_pending: p.pendingMessages})
+		node.allPendingGC(&s, pendingMessages)
+		if len(node.pendings) == 0 {
+			*result = append(*result, &Start_helper{States: &s, Remaining_pending: []int{}})
+		} else {
+			for _, p := range node.pendings {
+				// append_check_equivalence(&Start_helper{States: node.s, Remaining_pending: p.pendingMessages}, &result)
+				*result = append(*result, &Start_helper{States: &s, Remaining_pending: p.pendingMessages})
+			}
 		}
 		*visited = (*visited)[1:]
+		// fmt.Printf("result length： %+v!!!\n", len(*result))
 		return
 	}
 
@@ -314,17 +348,18 @@ func ExploreFromNode(visited *[](*Visited), pendingMessages *[]*messagepb.Messag
 				if idx == 0 {
 					continue
 				}
-				fmt.Printf("the state is the same: %+v\n", nd.s)
+				// fmt.Printf("the state is the same: %+v\n", nd.s)
 				nd.addPendings(rpd)
 				break
 			}
 		}
 		if !found {
-			new_node := Visited{s: &s, pendings: []Pendings{}}
+			new_node := Visited{s: &s, pendings: []Pendings{}, nil_events_pos: 0}
 			new_node.addPendings(rpd)
-			new_node.addPendings([]Pendings{Pendings{pendingMessages: []int{CHECKCOMMITINDEX, CHECKLEADER, TIMEOUT}}})
+			// new_node.addPendings([]Pendings{Pendings{pendingMessages: []int{CHECKCOMMITINDEX, CHECKLEADER, TIMEOUT}}})
+			// new_node.addPendings([]Pendings{Pendings{pendingMessages: []int{CHECKLEADER, TIMEOUT}}})
 			new_node.allPendingGC(&s, pendingMessages)
-			fmt.Printf("add new node! message: %+v, %+v\n", idx, new_node)
+			*states_counter = *states_counter + 1
 			*visited = append((*visited), &new_node)
 		}
 	}
@@ -381,28 +416,35 @@ func int_slice_included(s1 *[]int, s2 *[]int) int {
 }
 
 func ExploreBFS(start *state.State, end_s *EndState, pendingMessages *[]*messagepb.Message) *[]*Start {
-	fmt.Printf("------------------------pending messages:-------------------------\n")
-	for _, m := range *pendingMessages {
-		printMessage(*m)
-	}
+	// fmt.Printf("------------------------pending messages:-------------------------\n")
+	// for _, m := range *pendingMessages {
+	// 	printMessage(*m)
+	// }
 	counter := 0
+	states_counter := 0
 
 	pendings_index := make([]int, len((*pendingMessages)))
-	pendings_explored := make([]bool, len((*pendingMessages)))
+	// pendings_explored := make([]bool, len((*pendingMessages)))
 	for i, _ := range pendings_index {
 		pendings_index[i] = i
-		pendings_explored[i] = false
+		// pendings_explored[i] = false
 	}
-	pendings_index = append(pendings_index, CHECKCOMMITINDEX)
-	pendings_index = append(pendings_index, CHECKLEADER)
-	pendings_index = append(pendings_index, TIMEOUT)
-	pendings_explored = append(pendings_explored, false)
-	pendings_explored = append(pendings_explored, false)
-	pendings_explored = append(pendings_explored, false)
-	visited := []*Visited{&Visited{s: start, pendings: []Pendings{Pendings{pendingMessages: pendings_index, explored: pendings_explored}}}}
+	// pendings_index = append(pendings_index, CHECKCOMMITINDEX)
+	// pendings_index = append(pendings_index, CHECKLEADER)
+	// pendings_index = append(pendings_index, TIMEOUT)
+	// pendings_explored = append(pendings_explored, false)
+	// pendings_explored = append(pendings_explored, false)
+	// pendings_explored = append(pendings_explored, false)
+	// visited := []*Visited{&Visited{s: start, pendings: []Pendings{Pendings{pendingMessages: pendings_index, explored: pendings_explored}}}}
+	visited := []*Visited{&Visited{s: start, nil_events_pos: 0}}
+	if len(pendings_index) != 0 {
+		visited[0].addPendings([]Pendings{Pendings{pendingMessages: pendings_index}})
+	}
+	// fmt.Printf("the start node: %+v\n", visited[0])
+	// visited[0].addPendings([]Pendings{Pendings{pendingMessages: []int{CHECKCOMMITINDEX, CHECKLEADER, TIMEOUT}}})
 	result := make([]*Start_helper, 0)
 	for {
-		ExploreFromNode(&visited, pendingMessages, end_s, &result, &counter)
+		ExploreFromNode(&visited, pendingMessages, end_s, &result, &counter, &states_counter)
 		if len(visited) == 0 {
 			break
 		}
@@ -419,7 +461,7 @@ func ExploreBFS(start *state.State, end_s *EndState, pendingMessages *[]*message
 	// 		}
 	// 	}
 	// }
-	fmt.Printf("pending message length: %+v, explored messages: %+v\n", len(*pendingMessages), counter)
+	// fmt.Printf("pending message length: %+v, explored messages: %+v, total states explored: %+v\n", len(*pendingMessages), counter, states_counter)
 	// if counter > 100 {
 	// 	log.Fatalf("too many states!")
 	// }
@@ -429,11 +471,13 @@ func ExploreBFS(start *state.State, end_s *EndState, pendingMessages *[]*message
 	// for _, v := range result {
 	// 	fmt.Printf("state: %+v\n", *(v.States))
 	// }
-	return convert_to_start(&result, pendingMessages)
+	return convert_to_start(&result, pendingMessages, counter, states_counter)
 }
 
-func convert_to_start(result *[]*Start_helper, pendingmessages *[]*messagepb.Message) *[]*Start {
+func convert_to_start(result *[]*Start_helper, pendingmessages *[]*messagepb.Message, counter int, states_counter int) *[]*Start {
+	// fmt.Printf("result length: %+v\n", len(*result))
 	r := make([]*Start, 0)
+	start_counter := 0
 	for _, sh := range *result {
 		pm := make([]*messagepb.Message, 0)
 		for _, idx := range sh.Remaining_pending {
@@ -442,15 +486,17 @@ func convert_to_start(result *[]*Start_helper, pendingmessages *[]*messagepb.Mes
 			}
 			pm = append(pm, (*pendingmessages)[idx])
 		}
+		start_counter = start_counter + 1
 		r = append(r, &(Start{States: sh.States, Remaining_pending: pm}))
 	}
+	// fmt.Printf("result length: %+v pending message length: %+v, explored messages: %+v, total states explored: %+v, total final path: %+v\n", len(*result), len(*pendingmessages), counter, states_counter, start_counter)
 	return &r
 }
 
 func ExplorePaths(start *state.State, pendingMessages *[]*messagepb.Message, end messagepb.Message, connections []uint64, valid_indices []uint64) *[]*Start {
 	e, req := Inference(end)
 	end_s := EndState{End: e, Req: req, Connections: connections, Valid_indice: valid_indices}
-
+	// fmt.Printf("start to check: start: %+v\n, end: %+v\n", *start, end_s)
 	return ExploreBFS(start, &end_s, pendingMessages)
 }
 
@@ -511,9 +557,11 @@ func matched(s state.State, end *EndState) (state.State, bool) {
 			return s, (s.QuorumActive(end.Connections) || s.IndexValid(end.Valid_indice)) && s.SearchGet(end.End.(messagepb.Message))
 		}
 	default:
-		s, _ := Apply(s, end.Req)
+		s, r := Apply(s, end.Req)
+		// s, _ := Apply(s, end.Req)
+		// return s, true
 		// return s, reflect.DeepEqual(r, end.End)
-		return s, true
+		return s, reflect.DeepEqual(r, end.End)
 	}
 	return s, true
 }
@@ -538,7 +586,7 @@ func enabled(s state.State, msg messagepb.Message, end *EndState) (bool, bool, s
 		case messagepb.MsgAppResp:
 			s, _ := Apply(s, msg)
 			if end_msg.Success {
-				return LogMatch(s, end.Req.MEntries, s.CommitIndex, false), true, s
+				return LogMatch(s, end.Req.MEntries, s.CommitIndex, false, false), true, s
 			}
 			return true, true, s
 		case messagepb.MsgVoteResp:
