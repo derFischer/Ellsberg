@@ -487,6 +487,7 @@ func convert_to_start(result *[]*Start_helper, pendingmessages *[]*messagepb.Mes
 			pm = append(pm, (*pendingmessages)[idx])
 		}
 		start_counter = start_counter + 1
+		sh.States.Truncate()
 		r = append(r, &(Start{States: sh.States, Remaining_pending: pm}))
 	}
 	// fmt.Printf("result length: %+v pending message length: %+v, explored messages: %+v, total states explored: %+v, total final path: %+v\n", len(*result), len(*pendingmessages), counter, states_counter, start_counter)
