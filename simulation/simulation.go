@@ -113,16 +113,16 @@ func (s *Simulation) sendMsg(message messagepb.Msg) {
 }
 
 func (s *Simulation) receiveMsg(message messagepb.Msg) {
-	if message.Type == messagepb.ClientRequest {
-		if s.counter == 0 {
-			f, _ := createFile("/root/", "cpuprofile.out")
-			startCPUProfile(f)
-		}
-		s.counter = s.counter + 1
-		if s.counter == 25 {
-			stopCPUProfile()
-		}
-	}
+	// if message.Type == messagepb.ClientRequest {
+	// 	if s.counter == 0 {
+	// 		f, _ := createFile("/root/", "cpuprofile.out")
+	// 		startCPUProfile(f)
+	// 	}
+	// 	s.counter = s.counter + 1
+	// 	if s.counter == 25 {
+	// 		stopCPUProfile()
+	// 	}
+	// }
 	msg, ctx := messagepb.MsgInterpreter(message)
 	// if msg.Type != messagepb.MsgAppResp {
 	// 	fmt.Printf("receive read index resp: %+v\n", msg)
