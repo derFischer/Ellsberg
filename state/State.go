@@ -2,7 +2,6 @@ package state
 
 import (
 	"bytes"
-	"fmt"
 	"log"
 	"math"
 	"reflect"
@@ -350,63 +349,63 @@ func (s *State) Equal(s1 *State) bool {
 	return true
 }
 
-func (s *State) EqualPrint(s1 *State) bool {
-	if s.Me != s1.Me {
-		return false
-	}
-	if s.State != s1.State {
-		fmt.Printf("state is different!\n")
-		return false
-	}
-	if s.CurrentTerm != s1.CurrentTerm {
-		fmt.Printf("term is different!\n")
-		return false
-	}
-	if s.VotedFor != s1.VotedFor {
-		fmt.Printf("vote is different!\n")
-		return false
-	}
-	if &(s.Log[0]) != &(s1.Log[0]) {
-		if len(s.Log) != len(s1.Log) {
-			fmt.Printf("log length is different!\n")
-			return false
-		}
-		for i, v := range s.Log {
-			if !reflect.DeepEqual(v.Command.ReqID, s1.Log[i].Command.ReqID) {
-				fmt.Printf("log content is different!\n")
-				return false
-			}
-		}
-		// if !reflect.DeepEqual(s.Log, s1.Log) {
-		// 	return false
-		// }
-	}
-	if s.CommitIndex != s1.CommitIndex {
-		fmt.Printf("commit index is different!\n")
-		return false
-	}
+// func (s *State) EqualPrint(s1 *State) bool {
+// 	if s.Me != s1.Me {
+// 		return false
+// 	}
+// 	if s.State != s1.State {
+// 		fmt.Printf("state is different!\n")
+// 		return false
+// 	}
+// 	if s.CurrentTerm != s1.CurrentTerm {
+// 		fmt.Printf("term is different!\n")
+// 		return false
+// 	}
+// 	if s.VotedFor != s1.VotedFor {
+// 		fmt.Printf("vote is different!\n")
+// 		return false
+// 	}
+// 	if &(s.Log[0]) != &(s1.Log[0]) {
+// 		if len(s.Log) != len(s1.Log) {
+// 			fmt.Printf("log length is different!\n")
+// 			return false
+// 		}
+// 		for i, v := range s.Log {
+// 			if !reflect.DeepEqual(v.Command.ReqID, s1.Log[i].Command.ReqID) {
+// 				fmt.Printf("log content is different!\n")
+// 				return false
+// 			}
+// 		}
+// if !reflect.DeepEqual(s.Log, s1.Log) {
+// 	return false
+// }
+// 	}
+// 	if s.CommitIndex != s1.CommitIndex {
+// 		fmt.Printf("commit index is different!\n")
+// 		return false
+// 	}
 
-	if s.State == statepb.Candidate {
-		if &(s.Votes[0]) != &(s1.Votes[0]) {
-			if !reflect.DeepEqual(s.Votes, s1.Votes) {
-				fmt.Printf("vote is different!\n")
-				return false
-			}
-		}
-	}
-	if s.State == statepb.Leader {
-		if &(s.MmatchIndex[0]) != &(s1.MmatchIndex[0]) {
-			// if !reflect.DeepEqual(s.MmatchIndex, s1.MmatchIndex) {
-			// 	fmt.Printf("matchindex is different!\n")
-			// 	return false
-			// }
-			if findMajority(s.MmatchIndex) != findMajority(s1.MmatchIndex) {
-				return false
-			}
-		}
-	}
-	return true
-}
+// 	if s.State == statepb.Candidate {
+// 		if &(s.Votes[0]) != &(s1.Votes[0]) {
+// 			if !reflect.DeepEqual(s.Votes, s1.Votes) {
+// 				fmt.Printf("vote is different!\n")
+// 				return false
+// 			}
+// 		}
+// 	}
+// 	if s.State == statepb.Leader {
+// 		if &(s.MmatchIndex[0]) != &(s1.MmatchIndex[0]) {
+// 			// if !reflect.DeepEqual(s.MmatchIndex, s1.MmatchIndex) {
+// 			// 	fmt.Printf("matchindex is different!\n")
+// 			// 	return false
+// 			// }
+// 			if findMajority(s.MmatchIndex) != findMajority(s1.MmatchIndex) {
+// 				return false
+// 			}
+// 		}
+// 	}
+// 	return true
+// }
 
 func (s *State) LogGC() {
 	if len(s.Log) <= 100 {

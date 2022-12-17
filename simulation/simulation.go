@@ -48,6 +48,8 @@ type Simulation struct {
 	Connections map[messagepb.Ctx]Connection
 	ROReq       []ROEntry
 	ReadIndex   map[messagepb.Ctx]RIndex
+	msg_counter int
+	req_counter int
 	counter     int
 }
 
@@ -80,6 +82,8 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 
 	sl.ROReq = make([]ROEntry, 0)
 	sl.counter = 0
+	sl.msg_counter = 0
+	sl.req_counter = 0
 
 	go func() {
 		for {
@@ -114,14 +118,10 @@ func (s *Simulation) sendMsg(message messagepb.Msg) {
 
 func (s *Simulation) receiveMsg(message messagepb.Msg) {
 	// if message.Type == messagepb.ClientRequest {
-	// 	if s.counter == 0 {
-	// 		f, _ := createFile("/root/", "cpuprofile.out")
-	// 		startCPUProfile(f)
+	// 	if s.req_counter == 1000 {
+	// 		log.Fatalf("the number of states per message: %+v\n", s.counter/s.msg_counter)
 	// 	}
-	// 	s.counter = s.counter + 1
-	// 	if s.counter == 25 {
-	// 		stopCPUProfile()
-	// 	}
+	// 	s.req_counter++
 	// }
 	msg, ctx := messagepb.MsgInterpreter(message)
 	// if msg.Type != messagepb.MsgAppResp {
@@ -133,9 +133,11 @@ func (s *Simulation) receiveMsg(message messagepb.Msg) {
 
 func (s *Simulation) CheckMsg(msg messagepb.Message, connected_peers []uint64, valid_indice []uint64) {
 	tmp_state := make([]*partialOrder.Start, 0)
+	s.msg_counter++
 	for i := 0; i < len(s.States); i++ {
 		Starts := partialOrder.ExplorePaths(s.States[i].States, &s.States[i].Remaining_pending, msg, connected_peers, valid_indice)
 		for _, sh := range *Starts {
+			s.counter++
 			append_check_equivalence(sh, &tmp_state)
 		}
 	}
@@ -144,7 +146,8 @@ func (s *Simulation) CheckMsg(msg messagepb.Message, connected_peers []uint64, v
 		// s.dump()
 		log.Fatalf("No valid states for this message: %+v\n", msg)
 	}
-	// fmt.Printf("all states are: %+v\n", tmp_state)
+	// fmt.Printf("the number of states before merge: %+v, after merge: %+v\n", counter, len(tmp_state))
+	// if s.msg_counter
 	s.States = tmp_state
 }
 
@@ -321,7 +324,7 @@ func pointer_slice_included(s1 *[]*messagepb.Message, s2 *[]*messagepb.Message) 
 }
 
 func path_included(s1 *partialOrder.Start, s2 *partialOrder.Start) int {
-	if !s1.States.EqualPrint(s2.States) {
+	if !s1.States.Equal(s2.States) {
 		return -1
 	}
 

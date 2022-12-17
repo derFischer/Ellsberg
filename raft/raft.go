@@ -445,8 +445,8 @@ func (r *raft) send(args interface{}, m pb.Message) {
 			messagepb.Sending(r.SLmsg, messagepb.Msg{Send: true, Type: messagepb.RaftRequest, Msg: messagepb.RaftMsg{Msg: m, Req: args}})
 		}
 	} else {
-		// if m.Type == pb.MsgHeartbeatResp || m.Type == pb.MsgAppResp || m.Type == pb.MsgVoteResp || m.Type == pb.MsgReadIndexResp {
-		if m.Type == pb.MsgAppResp || m.Type == pb.MsgVoteResp || m.Type == pb.MsgReadIndexResp {
+		if m.Type == pb.MsgHeartbeatResp || m.Type == pb.MsgAppResp || m.Type == pb.MsgVoteResp || m.Type == pb.MsgReadIndexResp {
+			// if m.Type == pb.MsgAppResp || m.Type == pb.MsgVoteResp || m.Type == pb.MsgReadIndexResp {
 			messagepb.Sending(r.SLmsg, messagepb.Msg{Send: true, Type: messagepb.RaftResp, Msg: messagepb.RaftMsg{Msg: m, Req: args}})
 		}
 	}
