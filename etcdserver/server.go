@@ -1745,6 +1745,8 @@ func (s *EtcdServer) configure(ctx context.Context, cc raftpb.ConfChange) ([]*me
 	cc.ID = s.reqIDGen.Next()
 	ch := s.w.Register(cc.ID)
 
+	messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.ClientRequest, Msg: messagepb.ClientReq{Req: &cc, ID: cc.ID}})
+
 	start := time.Now()
 	if err := s.r.ProposeConfChange(ctx, cc); err != nil {
 		s.w.Trigger(cc.ID, nil)

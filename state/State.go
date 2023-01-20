@@ -5,9 +5,9 @@ import (
 	"log"
 	"math"
 	"reflect"
-	"sort"
 
 	"go.etcd.io/etcd/v3/messagepb"
+	"go.etcd.io/etcd/v3/simquorum"
 	"go.etcd.io/etcd/v3/statepb"
 )
 
@@ -19,15 +19,17 @@ const (
 const NOONE = math.MaxUint64 - 1
 
 type State struct {
-	Me          uint64
-	State       statepb.StateType
-	CurrentTerm uint64
-	VotedFor    uint64
-	Votes       []bool
-	Log         []statepb.Command
-	CommitIndex uint64
-	MmatchIndex []uint64
-	Peers       []uint64
+	Me              uint64
+	State           statepb.StateType
+	CurrentTerm     uint64
+	VotedFor        uint64
+	Votes           []bool
+	Log             []statepb.Command
+	CommitIndex     uint64
+	MmatchIndex     []uint64
+	Peers           []uint64
+	Quorum          simquorum.JointQuorum
+	PendingReconfig uint64
 }
 
 func (s *State) ClientRequestHandler(args messagepb.Message) {
@@ -41,87 +43,26 @@ func (s *State) ClientRequestHandler(args messagepb.Message) {
 	}
 
 	if s.State == statepb.Leader {
+		if t == statepb.EntryConfChange {
+			alreadyPending := s.PendingReconfig > s.CommitIndex
+			alreadyJoint := len(s.Quorum[1]) != 0
+			wantsLeaveJoint := len(args.ConfChange) == 0
+			if alreadyPending || (alreadyJoint && !wantsLeaveJoint) || (!alreadyJoint && wantsLeaveJoint) {
+				return
+			}
+			s.PendingReconfig = s.GetLastCommandIndex() + 1
+		}
 		l := make([]statepb.Command, len(s.Log))
 		copy(l, s.Log)
 		s.Log = l
 		s.Log = append(s.Log, statepb.Command{CommandIndex: s.GetLastCommandIndex() + 1, CommandTerm: s.CurrentTerm, Command: statepb.Op{ReqID: args.ReqID, Type: t, Key: args.Key, Value: args.Value, Data: args.Data}})
 
-		m := make([]uint64, len(s.MmatchIndex))
-		copy(m, s.MmatchIndex)
-		s.MmatchIndex = m
+		mi := make([]uint64, len(s.MmatchIndex))
+		copy(mi, s.MmatchIndex)
+		s.MmatchIndex = mi
 		s.MmatchIndex[inSlice(s.Peers, s.Me)] = s.GetLastCommandIndex()
 	}
 }
-
-// func (s *State) RequestVoteRequestHandler(args messagepb.RequestVoteArgs) messagepb.RequestVoteReply {
-// 	r := messagepb.RequestVoteReply{From: s.Me, To: args.From}
-// 	if s.DropStaleResponse(args.MTerm) {
-// 		r.MTerm = s.CurrentTerm
-// 		r.MVoteGranted = false
-// 		return r
-// 	}
-// 	s.UpdateTerm(args.MTerm)
-// 	logOK := (args.MLastLogTerm > s.GetLastCommandTerm()) || (args.MLastLogTerm == s.GetLastCommandTerm() && args.MLastLogIndex >= s.GetLastCommandIndex())
-// 	grant := (args.MTerm == s.CurrentTerm) && logOK && (s.VotedFor == NOONE || s.VotedFor == args.From)
-// 	if grant {
-// 		s.VotedFor = args.From
-// 	}
-// 	r.MTerm = s.CurrentTerm
-// 	r.MVoteGranted = grant
-// 	return r
-// }
-
-// func (s *State) AppendEntryRequestHandler(args messagepb.AppendEntriesArgs) messagepb.AppendEntriesReply {
-// 	r := messagepb.AppendEntriesReply{From: s.Me, To: args.From}
-// 	if s.DropStaleResponse(args.MTerm) {
-// 		r.MTerm = s.CurrentTerm
-// 		r.MSuccess = false
-// 		return r
-// 	}
-// 	s.UpdateTerm(args.MTerm)
-// 	logOK := (args.MPrevLogIndex == 0) || (args.MPrevLogIndex > 0 && args.MPrevLogIndex <= s.GetLastCommandIndex() && Equal(args.MPrevLogTerm, s.GetCommandTerm(args.MPrevLogIndex)))
-
-// 	if args.MTerm == s.CurrentTerm && s.State == statepb.Follower && !logOK {
-// 		r.MTerm = s.CurrentTerm
-// 		r.MSuccess = false
-// 		return r
-// 	}
-// 	if args.MTerm == s.CurrentTerm && s.State == statepb.Candidate {
-// 		s.State = statepb.Follower
-// 	}
-// 	if args.MTerm == s.CurrentTerm && s.State == statepb.Follower && logOK {
-// 		s.appendEntries(args.MEntries)
-// 		s.CommitIndex = max(s.CommitIndex, args.MCommitIndex)
-// 	}
-// 	r.MTerm = s.CurrentTerm
-// 	r.MSuccess = (args.MTerm == s.CurrentTerm) && (s.State == statepb.Follower) && logOK
-// 	r.MMatchIndex = args.MPrevLogIndex + uint64(len(args.MEntries))
-// 	return r
-// }
-
-// func (s *State) RequestVoteReplyHandler(reply messagepb.RequestVoteReply) {
-// 	if s.DropStaleResponse(reply.MTerm) {
-// 		return
-// 	}
-// 	s.UpdateTerm(reply.MTerm)
-
-// 	if reply.MVoteGranted {
-// 		s.ReceiveVotes(reply.From)
-// 	}
-// 	return
-// }
-
-// func (s *State) AppendEntryReplyHandler(reply messagepb.AppendEntriesReply) {
-// 	if s.DropStaleResponse(reply.MTerm) {
-// 		return
-// 	}
-// 	s.UpdateTerm(reply.MTerm)
-// 	if reply.MSuccess {
-// 		s.MmatchIndex[inSlice(s.Peers, reply.From)] = max(reply.MMatchIndex, s.MmatchIndex[inSlice(s.Peers, reply.From)])
-// 		// s.updateCommitIndex()
-// 	}
-// 	return
-// }
 
 func (s *State) RequestVoteRequestHandler(args messagepb.Message) messagepb.Message {
 	r := messagepb.Message{Type: messagepb.MsgVoteResp, From: s.Me, To: args.From}
@@ -161,7 +102,15 @@ func (s *State) AppendEntryRequestHandler(args messagepb.Message) messagepb.Mess
 	}
 	if args.Mterm == s.CurrentTerm && s.State == statepb.Follower && logOK {
 		s.appendEntries(args.MEntries)
+		old_commit := s.CommitIndex
 		s.CommitIndex = max(s.CommitIndex, args.CommitIndex)
+		for i := old_commit; i <= s.CommitIndex; i++ {
+			c := s.GetCommand(i)
+			if c.Command.Type == statepb.EntryConfChange {
+				//A follower will apply a conf change as soon as possible
+				s.ApplyReconfChange(c.Command.ConfChange)
+			}
+		}
 	}
 	r.Mterm = s.CurrentTerm
 	r.Success = (args.Mterm == s.CurrentTerm) && (s.State == statepb.Follower) && logOK
@@ -206,7 +155,64 @@ func (s *State) ReadIndexReplyHandler(reply messagepb.Message) {
 	s.UpdateTerm(reply.Mterm)
 }
 
-//other functions
+func (s *State) ApplyReconfChange(changes []statepb.ReconfigChange) {
+	var q simquorum.JointQuorum
+	q[0] = make([]uint64, len(s.Quorum[0]))
+	copy(q[0], s.Quorum[0])
+	new_peers := make([]uint64, len(s.Peers))
+	copy(new_peers, s.Peers)
+
+	if len(changes) != 0 {
+		if len(s.Quorum[1]) != 0 {
+			log.Fatalf("Reconfig on a joint quorum, invalid!\n")
+		}
+
+		if len(changes) == 1 {
+			//case 1: a single change, do not need to enter joint quorum:
+			change := changes[0]
+			if change.Type == statepb.AddNode {
+				if inSlice(new_peers, change.Node) != -1 {
+					new_peers = append(new_peers, change.Node)
+				}
+				if inSlice(q[0], change.Node) != -1 {
+					q[0] = append(q[0], change.Node)
+				}
+			}
+			if change.Type == statepb.RemoveNode {
+				// rmSlice(&new_peers, change.Node)
+				rmSlice(&q[0], change.Node)
+			}
+			q[1] = make([]uint64, 0)
+		} else {
+			//case 2: enter joint quorum
+			q[1] = make([]uint64, len(q[0]))
+			copy(q[1], q[0])
+			for _, change := range changes {
+				if change.Type == statepb.AddNode {
+					if inSlice(s.Peers, change.Node) != -1 {
+						new_peers = append(new_peers, change.Node)
+					}
+					if inSlice(q[0], change.Node) != -1 {
+						q[0] = append(q[0], change.Node)
+					}
+				}
+				if change.Type == statepb.RemoveNode {
+					rmSlice(&(q[0]), change.Node)
+				}
+			}
+		}
+	} else {
+		//leave joint
+		if len(s.Quorum[1]) == 0 {
+			log.Fatalf("Trying to leave a single quorum!\n")
+		}
+		q[1] = make([]uint64, 0)
+	}
+	s.Quorum = q
+	return
+}
+
+// other functions
 func (s *State) Truncate() {
 	s.LogGC()
 }
@@ -281,6 +287,7 @@ func (s *State) Leader() {
 		s.MmatchIndex[i] = 0
 	}
 	s.MmatchIndex[inSlice(s.Peers, s.Me)] = s.GetLastCommandIndex()
+	s.PendingReconfig = s.GetLastCommandIndex()
 }
 
 func (s *State) UpdateCommitIndex() {
@@ -289,11 +296,21 @@ func (s *State) UpdateCommitIndex() {
 		copy(m, s.MmatchIndex)
 		s.MmatchIndex = m
 		s.MmatchIndex[inSlice(s.Peers, s.Me)] = s.GetLastCommandIndex()
-		majority := findMajority(s.MmatchIndex)
+		majority := s.Quorum.CommitIndex(&s.MmatchIndex, &s.Peers)
 		if majority > s.CommitIndex {
+			old_commit := s.CommitIndex
 			command := s.GetCommand(majority)
 			if command.CommandTerm == s.CurrentTerm {
 				s.CommitIndex = max(command.CommandIndex, s.CommitIndex)
+				for i := old_commit; i <= s.CommitIndex; i++ {
+					c := s.GetCommand(i)
+					if c.Command.Type == statepb.EntryConfChange {
+						//if this is a single change or leave joint, apply it asap.
+						if len(c.Command.ConfChange) <= 1 {
+							s.ApplyReconfChange(c.Command.ConfChange)
+						}
+					}
+				}
 			}
 		}
 	}
@@ -321,9 +338,6 @@ func (s *State) Equal(s1 *State) bool {
 				return false
 			}
 		}
-		// if !reflect.DeepEqual(s.Log, s1.Log) {
-		// 	return false
-		// }
 	}
 	if s.CommitIndex != s1.CommitIndex {
 		return false
@@ -338,74 +352,13 @@ func (s *State) Equal(s1 *State) bool {
 	}
 	if s.State == statepb.Leader {
 		if &(s.MmatchIndex[0]) != &(s1.MmatchIndex[0]) {
-			// if !reflect.DeepEqual(s.MmatchIndex, s1.MmatchIndex) {
-			// 	return false
-			// }
-			if findMajority(s.MmatchIndex) != findMajority(s1.MmatchIndex) {
+			if s.Quorum.CommitIndex(&s.MmatchIndex, &s.Peers) != s1.Quorum.CommitIndex(&s1.MmatchIndex, &s1.Peers) {
 				return false
 			}
 		}
 	}
 	return true
 }
-
-// func (s *State) EqualPrint(s1 *State) bool {
-// 	if s.Me != s1.Me {
-// 		return false
-// 	}
-// 	if s.State != s1.State {
-// 		fmt.Printf("state is different!\n")
-// 		return false
-// 	}
-// 	if s.CurrentTerm != s1.CurrentTerm {
-// 		fmt.Printf("term is different!\n")
-// 		return false
-// 	}
-// 	if s.VotedFor != s1.VotedFor {
-// 		fmt.Printf("vote is different!\n")
-// 		return false
-// 	}
-// 	if &(s.Log[0]) != &(s1.Log[0]) {
-// 		if len(s.Log) != len(s1.Log) {
-// 			fmt.Printf("log length is different!\n")
-// 			return false
-// 		}
-// 		for i, v := range s.Log {
-// 			if !reflect.DeepEqual(v.Command.ReqID, s1.Log[i].Command.ReqID) {
-// 				fmt.Printf("log content is different!\n")
-// 				return false
-// 			}
-// 		}
-// if !reflect.DeepEqual(s.Log, s1.Log) {
-// 	return false
-// }
-// 	}
-// 	if s.CommitIndex != s1.CommitIndex {
-// 		fmt.Printf("commit index is different!\n")
-// 		return false
-// 	}
-
-// 	if s.State == statepb.Candidate {
-// 		if &(s.Votes[0]) != &(s1.Votes[0]) {
-// 			if !reflect.DeepEqual(s.Votes, s1.Votes) {
-// 				fmt.Printf("vote is different!\n")
-// 				return false
-// 			}
-// 		}
-// 	}
-// 	if s.State == statepb.Leader {
-// 		if &(s.MmatchIndex[0]) != &(s1.MmatchIndex[0]) {
-// 			// if !reflect.DeepEqual(s.MmatchIndex, s1.MmatchIndex) {
-// 			// 	fmt.Printf("matchindex is different!\n")
-// 			// 	return false
-// 			// }
-// 			if findMajority(s.MmatchIndex) != findMajority(s1.MmatchIndex) {
-// 				return false
-// 			}
-// 		}
-// 	}
-// 	return true
-// }
 
 func (s *State) LogGC() {
 	if len(s.Log) <= 100 {
@@ -444,7 +397,7 @@ func (s *State) SearchGet(r messagepb.Message) bool {
 	return last_commit_value_match
 }
 
-//hack function
+// hack function
 func (s *State) HackEntries(entries []statepb.Command) {
 	l := make([]statepb.Command, len(s.Log))
 	copy(l, s.Log)
@@ -466,9 +419,31 @@ func (s *State) HackEntries(entries []statepb.Command) {
 			s.Log[local_index] = cmd
 		}
 	}
+	mi := make([]uint64, len(s.MmatchIndex))
+	copy(mi, s.MmatchIndex)
+	s.MmatchIndex = mi
+	s.MmatchIndex[inSlice(s.Peers, s.Me)] = s.GetLastCommandIndex()
 }
 
-//helper function
+func (s *State) InsertEntries(entry statepb.Command) {
+	l := make([]statepb.Command, len(s.Log)+1)
+	start_index := s.GetFirstCommandIndex()
+	index := entry.CommandIndex
+	for i := 0; i < len(l); i++ {
+		log_index := uint64(i) + start_index
+		if log_index < index {
+			l[i] = s.Log[i]
+		} else if log_index == index {
+			l[i] = entry
+		} else {
+			l[i] = s.Log[i-1]
+			l[i].CommandIndex = l[i].CommandIndex + 1
+		}
+	}
+	s.Log = l
+}
+
+// helper function
 func Equal(arg1 uint64, arg2 uint64) bool {
 	if arg1 == TRUNCATED || arg2 == TRUNCATED {
 		return true
@@ -604,7 +579,7 @@ func (s *State) IndexValid(valid_indice []uint64) bool {
 	return false
 }
 
-//helper function
+// helper function
 func max(a uint64, b uint64) uint64 {
 	if a > b {
 		return a
@@ -613,15 +588,15 @@ func max(a uint64, b uint64) uint64 {
 	}
 }
 
-func findMajority(array []uint64) uint64 {
-	cp := make([]uint64, len(array))
-	copy(cp, array)
-	sort.Slice(cp, func(i, j int) bool {
-		return cp[i] < cp[j]
-	})
-	length := len(cp)
-	return cp[(length-1)/2]
-}
+// func findMajority(array []uint64) uint64 {
+// 	cp := make([]uint64, len(array))
+// 	copy(cp, array)
+// 	sort.Slice(cp, func(i, j int) bool {
+// 		return cp[i] < cp[j]
+// 	})
+// 	length := len(cp)
+// 	return cp[(length-1)/2]
+// }
 
 func inSlice(s []uint64, e uint64) int {
 	if s == nil {
@@ -629,9 +604,26 @@ func inSlice(s []uint64, e uint64) int {
 	}
 	length := len(s)
 	for i := 0; i < length; i++ {
-		if s[i] == e {
+		if (s)[i] == e {
 			return i
 		}
 	}
 	return -1
+}
+
+func rmSlice(s *simquorum.MajorityQuorum, e uint64) {
+	index := -1
+	for i, v := range *s {
+		if v == e {
+			index = i
+			break
+		}
+	}
+	if index == -1 {
+		return
+	}
+	for i := index + 1; i < len(*s); i++ {
+		(*s)[i-1] = (*s)[i]
+	}
+	(*s) = (*s)[:len(*s)-1]
 }

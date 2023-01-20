@@ -17,7 +17,7 @@ import (
 	"go.etcd.io/etcd/v3/statepb"
 )
 
-//nil events
+// nil events
 var checkLeaderEvent messagepb.Message = messagepb.Message{Type: messagepb.CheckLeader}
 var checkCommitIndex messagepb.Message = messagepb.Message{Type: messagepb.CheckCommitIndex}
 var timeout messagepb.Message = messagepb.Message{Type: messagepb.Timeout}
@@ -44,7 +44,7 @@ type Start struct {
 	Remaining_pending []*messagepb.Message
 }
 
-//helper
+// helper
 type Start_helper struct {
 	States            *state.State
 	Remaining_pending []int
@@ -587,7 +587,7 @@ func enabled(s state.State, msg messagepb.Message, end *EndState) (bool, bool, s
 		case messagepb.MsgAppResp:
 			s, _ := Apply(s, msg)
 			if end_msg.Success {
-				return LogMatch(s, end.Req.MEntries, s.CommitIndex, false, false), true, s
+				return LogMatch(&s, end.Req.MEntries, s.CommitIndex, false, false), true, s
 			}
 			return true, true, s
 		case messagepb.MsgVoteResp:

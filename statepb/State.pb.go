@@ -24,12 +24,25 @@ const (
 	EntryUnknown    EntryType = 4
 )
 
+type ReconfigChangeType int8
+
+const (
+	AddNode    ReconfigChangeType = 1
+	RemoveNode ReconfigChangeType = 2
+)
+
+type ReconfigChange struct {
+	Type ReconfigChangeType
+	Node uint64
+}
+
 type Op struct {
-	ReqID interface{}
-	Type  EntryType
-	Key   []byte
-	Value []byte
-	Data  []byte
+	ReqID      interface{}
+	Type       EntryType
+	Key        []byte
+	Value      []byte
+	Data       []byte
+	ConfChange []ReconfigChange
 }
 
 type Command struct {

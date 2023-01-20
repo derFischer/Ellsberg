@@ -12,6 +12,7 @@ import (
 
 	"go.etcd.io/etcd/v3/messagepb"
 	"go.etcd.io/etcd/v3/partialOrder"
+	"go.etcd.io/etcd/v3/simquorum"
 	"go.etcd.io/etcd/v3/state"
 	"go.etcd.io/etcd/v3/statepb"
 )
@@ -59,6 +60,10 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	matchIndex := make([]uint64, total)
 	alive := make(map[messagepb.Ctx]Connection)
 	rindex := make(map[messagepb.Ctx]RIndex)
+	var q simquorum.JointQuorum
+	q[0] = make([]uint64, len(peers))
+	copy(q[0], peers)
+	q[1] = []uint64{}
 
 	for i := 0; i < total; i++ {
 		votes[i] = false
@@ -75,7 +80,7 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	sl := new(Simulation)
 	sl.me = id
 	sl.States = make([]*partialOrder.Start, 1)
-	sl.States[0] = &partialOrder.Start{States: &state.State{Me: id, State: statepb.Follower, CurrentTerm: 1, VotedFor: state.NOONE, Votes: votes, Log: lg, CommitIndex: 3, MmatchIndex: matchIndex, Peers: peers}}
+	sl.States[0] = &partialOrder.Start{States: &state.State{Me: id, State: statepb.Follower, CurrentTerm: 1, VotedFor: state.NOONE, Votes: votes, Log: lg, CommitIndex: 3, MmatchIndex: matchIndex, Peers: peers, Quorum: q}}
 	sl.MsgCh = make(chan messagepb.Msg)
 	sl.Connections = alive
 	sl.ReadIndex = rindex
@@ -132,6 +137,7 @@ func (s *Simulation) receiveMsg(message messagepb.Msg) {
 }
 
 func (s *Simulation) CheckMsg(msg messagepb.Message, connected_peers []uint64, valid_indice []uint64) {
+	// s.dump()
 	tmp_state := make([]*partialOrder.Start, 0)
 	s.msg_counter++
 	for i := 0; i < len(s.States); i++ {
@@ -142,6 +148,7 @@ func (s *Simulation) CheckMsg(msg messagepb.Message, connected_peers []uint64, v
 		}
 	}
 	if len(tmp_state) == 0 {
+		s.dump()
 		// fmt.Printf("No valid states for this message. The message: %+v\n ", msg)
 		// s.dump()
 		log.Fatalf("No valid states for this message: %+v\n", msg)
@@ -384,7 +391,7 @@ func convert_to_start(result *[]partialOrder.Start_helper, pendingmessages *[]*m
 	return &r
 }
 
-//helper function
+// helper function
 func (s *Simulation) searchConnection(ctx messagepb.Ctx, add bool, ref int) bool {
 	_, exists := s.Connections[ctx]
 	if exists {
@@ -469,7 +476,7 @@ func stopCPUProfile() {
 	pprof.StopCPUProfile()
 }
 
-//debug function
+// debug function
 func dumpStart(Start partialOrder.Start) {
 	fmt.Printf("STATE: %+v\n", Start.States.State)
 	fmt.Printf("TERM: %+v\n", Start.States.CurrentTerm)
@@ -478,6 +485,7 @@ func dumpStart(Start partialOrder.Start) {
 	fmt.Printf("LOG:%+v\n", Start.States.Log)
 	fmt.Printf("COMMITINDEX: %+v\n", Start.States.CommitIndex)
 	fmt.Printf("MMATCHINDEX: %+v\n\n\n", Start.States.MmatchIndex)
+	fmt.Printf("QUORUM: %+v, %+v\n\n\n", Start.States.Quorum[0], Start.States.Quorum[1])
 
 	fmt.Printf("remaining message:\n\n")
 	for i := 0; i < len(Start.Remaining_pending); i++ {

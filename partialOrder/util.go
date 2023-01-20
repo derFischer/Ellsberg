@@ -163,7 +163,7 @@ func commandMatch(cmd1 statepb.Command, cmd2 statepb.Command) bool {
 	return true
 }
 
-func LogMatch(s1 state.State, pl []statepb.Command, commit_index uint64, matched bool, matched_last bool) bool {
+func LogMatch(s1 *state.State, pl []statepb.Command, commit_index uint64, matched bool, matched_last bool) bool {
 	first_index1 := s1.GetFirstCommandIndex()
 	last_index1 := s1.GetLastCommandIndex()
 	if matched_last {
@@ -194,7 +194,12 @@ func LogMatch(s1 state.State, pl []statepb.Command, commit_index uint64, matched
 
 		cmd2 := s1.Log[command_index-first_index1]
 		if !commandMatch(cmd, cmd2) {
-			// fmt.Printf("cmd: %+v\n, cmd2: %+v\n\n\n", cmd, cmd2)
+			if cmd.Command.Type == statepb.EntryConfChange && len(cmd.Command.ConfChange) == 0 && s1.PendingReconfig < cmd.CommandIndex {
+				if s1.CommitIndex >= s1.PendingReconfig && len(s1.Log[s1.PendingReconfig].Command.ConfChange) > 1 && len(s1.Quorum[1]) == 0 {
+					s1.InsertEntries(cmd)
+					s1.ApplyReconfChange(s1.Log[s1.PendingReconfig].Command.ConfChange)
+				}
+			}
 			if matched {
 				return false
 			}
@@ -224,11 +229,11 @@ func ParitialStateEnabled(end_s *interface{}, from state.State, msg messagepb.Me
 		return false, true, s
 	}
 	if ps.CurrentTerm == s.CurrentTerm && s.State == statepb.Leader {
-		if !LogMatch(s, ps.Log, from.CommitIndex, false, true) {
+		if !LogMatch(&s, ps.Log, from.CommitIndex, false, true) {
 			return false, true, s
 		}
 	} else {
-		if !LogMatch(s, ps.Log, from.CommitIndex, false, false) {
+		if !LogMatch(&s, ps.Log, from.CommitIndex, false, false) {
 			return false, true, s
 		}
 	}
@@ -258,7 +263,7 @@ func PartialStateMatched(end_s *interface{}, s state.State) (state.State, bool) 
 	ps := (*end_s).(state.PartialState)
 	// s := CopyState(st)
 	if ps.State == statepb.Candidate {
-		return s, StateMatch(s, ps) && TermMatch(s, ps) && VotedForMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true, false) && CommitIndexMatch(s, ps)
+		return s, StateMatch(s, ps) && TermMatch(s, ps) && VotedForMatch(s, ps) && LogMatch(&s, ps.Log, math.MaxUint64, true, false) && CommitIndexMatch(s, ps)
 	} else if ps.State == statepb.Leader {
 		//hack:
 		if !StateMatch(s, ps) {
@@ -272,9 +277,9 @@ func PartialStateMatched(end_s *interface{}, s state.State) (state.State, bool) 
 				return s, StateMatch(s, ps) && TermMatch(s, ps)
 			}
 		}
-		return s, StateMatch(s, ps) && TermMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true, true) && CommitIndexMatch(s, ps)
+		return s, StateMatch(s, ps) && TermMatch(s, ps) && LogMatch(&s, ps.Log, math.MaxUint64, true, true) && CommitIndexMatch(s, ps)
 	} else if ps.State == statepb.Follower {
-		return s, StateMatch(s, ps) && TermMatch(s, ps) && VotedForMatch(s, ps) && LogMatch(s, ps.Log, math.MaxUint64, true, false) && CommitIndexMatch(s, ps)
+		return s, StateMatch(s, ps) && TermMatch(s, ps) && VotedForMatch(s, ps) && LogMatch(&s, ps.Log, math.MaxUint64, true, false) && CommitIndexMatch(s, ps)
 	}
 	return s, true
 }
