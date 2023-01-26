@@ -71,16 +71,18 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	}
 
 	//hack the initial state
-	lg := make([]statepb.Command, 4)
+	lg := make([]statepb.Command, 6)
 	lg[0] = statepb.Command{CommandIndex: 0}
 	lg[1] = statepb.Command{CommandIndex: 1}
 	lg[2] = statepb.Command{CommandIndex: 2}
-	lg[3] = statepb.Command{CommandIndex: 3, CommandTerm: 1}
+	lg[3] = statepb.Command{CommandIndex: 3}
+	lg[4] = statepb.Command{CommandIndex: 4}
+	lg[5] = statepb.Command{CommandIndex: 5, CommandTerm: 1}
 
 	sl := new(Simulation)
 	sl.me = id
 	sl.States = make([]*partialOrder.Start, 1)
-	sl.States[0] = &partialOrder.Start{States: &state.State{Me: id, State: statepb.Follower, CurrentTerm: 1, VotedFor: state.NOONE, Votes: votes, Log: lg, CommitIndex: 3, MmatchIndex: matchIndex, Peers: peers, Quorum: q}}
+	sl.States[0] = &partialOrder.Start{States: &state.State{Me: id, State: statepb.Follower, CurrentTerm: 1, VotedFor: state.NOONE, Votes: votes, Log: lg, CommitIndex: 5, MmatchIndex: matchIndex, Peers: peers, Quorum: q}}
 	sl.MsgCh = make(chan messagepb.Msg)
 	sl.Connections = alive
 	sl.ReadIndex = rindex
@@ -118,7 +120,7 @@ func (s *Simulation) sendMsg(message messagepb.Msg) {
 	msg, ctx := messagepb.MsgInterpreter(message)
 	connected_peers, valid_indice := s.ROSendPreprocess(msg, ctx)
 	s.CheckMsg(msg, connected_peers, valid_indice)
-	// fmt.Printf("the states after sending the message: %+v, message type: %+v\n", len(s.States), msg.Type)
+	// fmt.Printf("the states after sending the message: %+v, message type: %+v\n", *(s.States[0].States), msg.Type)
 }
 
 func (s *Simulation) receiveMsg(message messagepb.Msg) {
@@ -331,7 +333,7 @@ func pointer_slice_included(s1 *[]*messagepb.Message, s2 *[]*messagepb.Message) 
 }
 
 func path_included(s1 *partialOrder.Start, s2 *partialOrder.Start) int {
-	if !s1.States.Equal(s2.States) {
+	if !s1.States.Equal(s2.States, true) {
 		return -1
 	}
 

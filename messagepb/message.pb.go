@@ -168,7 +168,11 @@ func RaftMsgInterpreter(message RaftMsg, send bool) (Message, Ctx) {
 	case raftpb.MsgAppResp:
 		if send {
 			req := message.Req.(raftpb.Message)
-			return Message{Type: MsgAppResp, From: msg.From, To: msg.To, Mterm: msg.Term, Success: !msg.Reject, MatchIndex: msg.Index, Index: req.Index, IndexTerm: req.LogTerm, MEntries: CommandsInterpreter(req.Entries), CommitIndex: req.Commit, ReqTerm: req.Term}, nil
+			if msg.Reject {
+				return Message{Type: MsgAppResp, From: msg.From, To: msg.To, Mterm: msg.Term, Success: false, MatchIndex: 0, Index: req.Index, IndexTerm: req.LogTerm, MEntries: CommandsInterpreter(req.Entries), CommitIndex: req.Commit, ReqTerm: req.Term}, nil
+			} else {
+				return Message{Type: MsgAppResp, From: msg.From, To: msg.To, Mterm: msg.Term, Success: true, MatchIndex: msg.Index, Index: req.Index, IndexTerm: req.LogTerm, MEntries: CommandsInterpreter(req.Entries), CommitIndex: req.Commit, ReqTerm: req.Term}, nil
+			}
 		} else {
 			return Message{Type: MsgAppResp, From: msg.From, To: msg.To, Mterm: msg.Term, Success: !msg.Reject, MatchIndex: msg.Index}, nil
 		}
@@ -183,7 +187,7 @@ func RaftMsgInterpreter(message RaftMsg, send bool) (Message, Ctx) {
 		}
 	case raftpb.MsgHeartbeat:
 		ctx := CtxInterpreter(msg.Context)
-		return Message{Type: MsgApp, From: msg.From, To: msg.To, Mterm: msg.Term, Index: 0, IndexTerm: 0, MEntries: []statepb.Command{}, CommitIndex: msg.Commit}, ctx
+		return Message{Type: MsgApp, From: msg.From, To: msg.To, Mterm: msg.Term, Index: statepb.Unknown, IndexTerm: statepb.Unknown, MEntries: []statepb.Command{}, CommitIndex: msg.Commit}, ctx
 	case raftpb.MsgHeartbeatResp:
 		// fmt.Printf("receive heartbeat message!!!\n")
 		if send {

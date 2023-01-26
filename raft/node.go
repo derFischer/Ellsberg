@@ -569,6 +569,11 @@ func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState) Ready {
 		CommittedEntries: r.raftLog.nextEnts(),
 		Messages:         r.msgs,
 	}
+	//hack:
+	if r.isFollower() && r.raftLog.lastIndex() > 12 || r.Term == 3 && r.raftLog.committed < 17 {
+		rd.CommittedEntries = nil
+	}
+
 	if softSt := r.softState(); !softSt.equal(prevSoftSt) {
 		rd.SoftState = softSt
 	}

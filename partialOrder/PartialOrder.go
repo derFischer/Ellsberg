@@ -343,7 +343,7 @@ func ExploreFromNode(visited *[](*Visited), pendingMessages *[]*messagepb.Messag
 		found := false
 		for idx := 0; idx < len(*visited); idx++ {
 			nd := (*visited)[idx]
-			if s.Equal(nd.s) {
+			if s.Equal(nd.s, false) {
 				found = true
 				if idx == 0 {
 					continue
@@ -356,8 +356,6 @@ func ExploreFromNode(visited *[](*Visited), pendingMessages *[]*messagepb.Messag
 		if !found {
 			new_node := Visited{s: &s, pendings: []Pendings{}, nil_events_pos: 0}
 			new_node.addPendings(rpd)
-			// new_node.addPendings([]Pendings{Pendings{pendingMessages: []int{CHECKCOMMITINDEX, CHECKLEADER, TIMEOUT}}})
-			// new_node.addPendings([]Pendings{Pendings{pendingMessages: []int{CHECKLEADER, TIMEOUT}}})
 			new_node.allPendingGC(&s, pendingMessages)
 			*states_counter = *states_counter + 1
 			*visited = append((*visited), &new_node)
@@ -544,25 +542,24 @@ func matched(s state.State, end *EndState) (state.State, bool) {
 	case state.PartialState:
 		return PartialStateMatched(&(end.End), s)
 	case messagepb.Message:
-		if end.End.(messagepb.Message).Type == messagepb.ClientNormalResp {
-			index := 0
-			for i := 0; i < len(s.Log); i++ {
-				if reflect.DeepEqual(s.Log[i].Command.ReqID, end.End.(messagepb.Message).ReqID) {
-					index = i
-					break
+		if end.Req.Type == 0 {
+			if end.End.(messagepb.Message).Type == messagepb.ClientNormalResp {
+				index := 0
+				for i := 0; i < len(s.Log); i++ {
+					if reflect.DeepEqual(s.Log[i].Command.ReqID, end.End.(messagepb.Message).ReqID) {
+						index = i
+						break
+					}
 				}
+				return s, s.GetCommitIndex() >= (uint64(index) + s.GetFirstCommandIndex())
+				// return s, true
+			} else if end.End.(messagepb.Message).Type == messagepb.ClientROResp {
+				return s, (s.QuorumActive(end.Connections) || s.IndexValid(end.Valid_indice)) && s.SearchGet(end.End.(messagepb.Message))
 			}
-			return s, s.GetCommitIndex() >= (uint64(index) + s.GetFirstCommandIndex())
-			// return s, true
-		} else if end.End.(messagepb.Message).Type == messagepb.ClientROResp {
-			return s, (s.QuorumActive(end.Connections) || s.IndexValid(end.Valid_indice)) && s.SearchGet(end.End.(messagepb.Message))
+		} else {
+			s, r := Apply(s, end.Req)
+			return s, reflect.DeepEqual(r, end.End)
 		}
-	default:
-		s, r := Apply(s, end.Req)
-		// s, _ := Apply(s, end.Req)
-		// return s, true
-		// return s, reflect.DeepEqual(r, end.End)
-		return s, reflect.DeepEqual(r, end.End)
 	}
 	return s, true
 }

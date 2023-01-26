@@ -55,12 +55,12 @@ func (s *State) ClientRequestHandler(args messagepb.Message) {
 		l := make([]statepb.Command, len(s.Log))
 		copy(l, s.Log)
 		s.Log = l
-		s.Log = append(s.Log, statepb.Command{CommandIndex: s.GetLastCommandIndex() + 1, CommandTerm: s.CurrentTerm, Command: statepb.Op{ReqID: args.ReqID, Type: t, Key: args.Key, Value: args.Value, Data: args.Data}})
+		s.Log = append(s.Log, statepb.Command{CommandIndex: s.GetLastCommandIndex() + 1, CommandTerm: s.CurrentTerm, Command: statepb.Op{ReqID: args.ReqID, Type: t, Key: args.Key, Value: args.Value, Data: args.Data, ConfChange: args.ConfChange}})
 
-		mi := make([]uint64, len(s.MmatchIndex))
-		copy(mi, s.MmatchIndex)
-		s.MmatchIndex = mi
-		s.MmatchIndex[inSlice(s.Peers, s.Me)] = s.GetLastCommandIndex()
+		// mi := make([]uint64, len(s.MmatchIndex))
+		// copy(mi, s.MmatchIndex)
+		// s.MmatchIndex = mi
+		// s.MmatchIndex[inSlice(s.Peers, s.Me)] = s.GetLastCommandIndex()
 	}
 }
 
@@ -114,7 +114,9 @@ func (s *State) AppendEntryRequestHandler(args messagepb.Message) messagepb.Mess
 	}
 	r.Mterm = s.CurrentTerm
 	r.Success = (args.Mterm == s.CurrentTerm) && (s.State == statepb.Follower) && logOK
-	r.MatchIndex = args.Index + uint64(len(args.MEntries))
+	if r.Success {
+		r.MatchIndex = args.Index + uint64(len(args.MEntries))
+	}
 	return r
 }
 
@@ -235,17 +237,18 @@ func (s *State) TestLeader() bool {
 	if s.State != statepb.Candidate {
 		return false
 	}
-	votes := 0
-	var i int
-	for i = 0; i < len(s.Peers); i++ {
-		if s.Votes[i] == true {
-			votes += 1
-		}
-	}
-	if votes > len(s.Peers)/2 {
-		return true
-	}
-	return false
+	return s.Quorum.VoteSuccess(&s.Votes, &s.Peers)
+	// votes := 0
+	// var i int
+	// for i = 0; i < len(s.Peers); i++ {
+	// 	if s.Votes[i] == true {
+	// 		votes += 1
+	// 	}
+	// }
+	// if votes > len(s.Peers)/2 {
+	// 	return true
+	// }
+	// return false
 }
 
 func (s *State) CheckLeader() {
@@ -316,7 +319,7 @@ func (s *State) UpdateCommitIndex() {
 	}
 }
 
-func (s *State) Equal(s1 *State) bool {
+func (s *State) Equal(s1 *State, merge bool) bool {
 	if s.Me != s1.Me {
 		return false
 	}
@@ -352,8 +355,14 @@ func (s *State) Equal(s1 *State) bool {
 	}
 	if s.State == statepb.Leader {
 		if &(s.MmatchIndex[0]) != &(s1.MmatchIndex[0]) {
-			if s.Quorum.CommitIndex(&s.MmatchIndex, &s.Peers) != s1.Quorum.CommitIndex(&s1.MmatchIndex, &s1.Peers) {
-				return false
+			if merge {
+				if s.Quorum.CommitIndex(&s.MmatchIndex, &s.Peers) != s1.Quorum.CommitIndex(&s1.MmatchIndex, &s1.Peers) {
+					return false
+				}
+			} else {
+				if !reflect.DeepEqual(s.MmatchIndex, s1.MmatchIndex) {
+					return false
+				}
 			}
 		}
 	}

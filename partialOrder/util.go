@@ -1,6 +1,7 @@
 package partialOrder
 
 import (
+	"fmt"
 	"log"
 	"math"
 	"reflect"
@@ -78,7 +79,7 @@ func MsgAppInference(msg messagepb.Message) state.PartialState {
 
 func MsgVoteInference(msg messagepb.Message) state.PartialState {
 	log := make([]statepb.Command, 0)
-	log = append(log, statepb.Command{CommandIndex: msg.Index, CommandTerm: msg.IndexTerm})
+	log = append(log, statepb.Command{CommandIndex: msg.Index, CommandTerm: msg.IndexTerm, Command: statepb.Op{Type: statepb.EntryUnknown}})
 	return state.PartialState{State: statepb.Candidate, CurrentTerm: msg.Mterm, VotedFor: msg.From, Log: log, CommitIndex: statepb.Unknown}
 }
 
@@ -157,15 +158,26 @@ func commandMatch(cmd1 statepb.Command, cmd2 statepb.Command) bool {
 	if cmd1.Command.Type == statepb.EntryUnknown {
 		return true
 	}
-	if !reflect.DeepEqual(cmd1.Command.Data, cmd2.Command.Data) {
+	if cmd1.Command.Type == statepb.EntryConfChange {
+		if !reflect.DeepEqual(cmd1.Command.ConfChange, cmd2.Command.ConfChange) {
+			fmt.Printf("different conf change:%+v, %+v\n", cmd1.Command.ConfChange, cmd2.Command.ConfChange)
+			return false
+		}
+	} else if !reflect.DeepEqual(cmd1.Command.Data, cmd2.Command.Data) {
 		return false
 	}
+	// if !reflect.DeepEqual(cmd1.Command.Data, cmd2.Command.Data) {
+	// 	return false
+	// }
 	return true
 }
 
 func LogMatch(s1 *state.State, pl []statepb.Command, commit_index uint64, matched bool, matched_last bool) bool {
 	first_index1 := s1.GetFirstCommandIndex()
 	last_index1 := s1.GetLastCommandIndex()
+	if pl[len(pl)-1].CommandIndex == statepb.Unknown {
+		matched_last = false
+	}
 	if matched_last {
 		if len(pl) == 0 {
 			return true
@@ -178,16 +190,23 @@ func LogMatch(s1 *state.State, pl []statepb.Command, commit_index uint64, matche
 	for i := 0; i < len(pl); i++ {
 		cmd := pl[i]
 		command_index := cmd.CommandIndex
+		if command_index == statepb.Unknown {
+			continue
+		}
 		if last_index1 < command_index {
+			if last_index1 == command_index-1 {
+				if cmd.Command.Type == statepb.EntryNormal && len(cmd.Command.Data) == 0 && cmd.CommandTerm <= s1.CurrentTerm {
+					s1.InsertEntries(cmd)
+					return true
+				}
+			}
 			if matched {
 				return false
 			} else {
 				return true
 			}
 		}
-		// if first_index1 < command_index {
-		// 	continue
-		// }
+
 		if first_index1 > command_index {
 			continue
 		}
@@ -199,6 +218,9 @@ func LogMatch(s1 *state.State, pl []statepb.Command, commit_index uint64, matche
 					s1.InsertEntries(cmd)
 					s1.ApplyReconfChange(s1.Log[s1.PendingReconfig].Command.ConfChange)
 				}
+			}
+			if cmd.Command.Type == statepb.EntryNormal && len(cmd.Command.Data) == 0 && cmd.CommandTerm <= s1.CurrentTerm {
+				s1.InsertEntries(cmd)
 			}
 			if matched {
 				return false
@@ -272,9 +294,9 @@ func PartialStateMatched(end_s *interface{}, s state.State) (state.State, bool) 
 		// fmt.Printf("entering here!\n")
 		if ps.Log != nil && len(ps.Log) != 0 {
 			last_index := ps.Log[len(ps.Log)-1].CommandIndex
-			if last_index <= 7 {
+			if last_index <= 11 {
 				s.HackEntries(ps.Log)
-				return s, StateMatch(s, ps) && TermMatch(s, ps)
+				return s, StateMatch(s, ps) && TermMatch(s, ps) && CommitIndexMatch(s, ps)
 			}
 		}
 		return s, StateMatch(s, ps) && TermMatch(s, ps) && LogMatch(&s, ps.Log, math.MaxUint64, true, true) && CommitIndexMatch(s, ps)
