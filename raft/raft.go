@@ -535,11 +535,14 @@ func (r *raft) sendHeartbeat(to uint64, ctx []byte) {
 	// or it might not have all the committed entries.
 	// The leader MUST NOT forward the follower's commit to
 	// an unmatched index.
-	commit := min(r.prs.Progress[to].Match, r.raftLog.committed)
+	// commit := min(r.prs.Progress[to].Match, r.raftLog.committed)
 	m := pb.Message{
 		To:      to,
-		Type:    pb.MsgHeartbeat,
-		Commit:  commit,
+		Type:    pb.MsgApp,
+		LogTerm: r.raftLog.lastTerm(),
+		Index:   r.raftLog.lastIndex(),
+		Entries: make([]pb.Entry, 0),
+		Commit:  r.raftLog.committed,
 		Context: ctx,
 	}
 
@@ -1154,6 +1157,23 @@ func stepLeader(r *raft, m pb.Message) error {
 	switch m.Type {
 	case pb.MsgAppResp:
 		pr.RecentActive = true
+		pr.ProbeSent = false
+
+		// free one slot for the full inflights window to allow progress.
+		if pr.State == tracker.StateReplicate && pr.Inflights.Full() {
+			pr.Inflights.FreeFirstOne()
+		}
+
+		if r.readOnly.option == ReadOnlySafe && len(m.Context) != 0 {
+			if r.prs.Voters.VoteResult(r.readOnly.recvAck(m.From, m.Context)) == quorum.VoteWon {
+				rss := r.readOnly.advance(m)
+				for _, rs := range rss {
+					if resp := r.responseToReadIndexReq(rs.req, rs.index); resp.To != None {
+						r.send(m, resp)
+					}
+				}
+			}
+		}
 
 		if m.Reject {
 			r.logger.Debugf("%x received MsgAppResp(MsgApp was rejected, lastindex: %d) from %x for index %d",
@@ -1408,16 +1428,16 @@ func stepFollower(r *raft, m pb.Message) error {
 
 func (r *raft) handleAppendEntries(m pb.Message) {
 	if m.Index < r.raftLog.committed {
-		r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.committed})
+		r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.committed, Context: m.Context})
 		return
 	}
 
 	if mlastIndex, ok := r.raftLog.maybeAppend(m.Index, m.LogTerm, m.Commit, m.Entries...); ok {
-		r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Index: mlastIndex})
+		r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Index: mlastIndex, Context: m.Context})
 	} else {
 		r.logger.Debugf("%x [logterm: %d, index: %d] rejected MsgApp [logterm: %d, index: %d] from %x",
 			r.id, r.raftLog.zeroTermOnErrCompacted(r.raftLog.term(m.Index)), m.Index, m.LogTerm, m.Index, m.From)
-		r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Index: m.Index, Reject: true, RejectHint: r.raftLog.lastIndex()})
+		r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Index: m.Index, Reject: true, RejectHint: r.raftLog.lastIndex(), Context: m.Context})
 	}
 }
 
