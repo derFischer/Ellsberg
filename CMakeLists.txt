@@ -35,7 +35,7 @@ enable_testing()
 
 if (NOT CMAKE_BUILD_TYPE)
     message(STATUS "No build type selected, defaulting to Release")
-    set(CMAKE_BUILD_TYPE "RelWithDebInfo")
+    set(CMAKE_BUILD_TYPE "Debug")
 endif ()
 
 message(STATUS "Main build type: ${CMAKE_BUILD_TYPE}")
@@ -220,6 +220,7 @@ add_library(redisraft MODULE
         src/entrycache.c
         src/file.c
         src/fsync.c
+        src/interpreter.c
         src/join.c
         src/log.c
         src/metadata.c
@@ -279,6 +280,7 @@ add_executable(main
         src/entrycache.c
         src/file.c
         src/fsync.c
+        src/interpreter.c
         src/join.c
         src/log.c
         src/metadata.c

@@ -101,6 +101,7 @@ add_custom_target(tests_full)
 add_dependencies(tests_full check test_fuzzer test_virtraft)
 
 set(RAFT_SOURCE_FILES
+        src/raft_forwarder.c
         src/raft_log.c
         src/raft_server.c
         src/raft_node.c

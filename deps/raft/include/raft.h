@@ -94,6 +94,9 @@ typedef struct raft_entry
     /** the entry's unique ID */
     raft_entry_id_t id;
 
+    /** the entry's corresponding Req ID */
+    raft_req_id_t req_id;
+
     /** session this entry belongs to **/
     raft_session_t session;
 
@@ -1614,5 +1617,17 @@ int raft_pending_operations(raft_server_t *me);
  *          RAFT_ERR_MISUSE if a misuse detected.
  */
 int raft_restore_log(raft_server_t *me);
+
+typedef struct forwarder forwarder_t;
+
+struct forwarder {
+  int sock;  // me
+};
+
+forwarder_t *raft_get_forwarder(raft_server_t *me);
+
+void raft_forward(raft_server_t *me, const void *buf, int len);
+
+raft_req_id_t raft_node_next_reqid(raft_node_t *node);
 
 #endif /* RAFT_H_ */

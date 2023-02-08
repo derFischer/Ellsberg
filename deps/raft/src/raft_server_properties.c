@@ -13,6 +13,11 @@
 #include "raft.h"
 #include "raft_private.h"
 
+forwarder_t *raft_get_forwarder(raft_server_t *me)
+{
+    return me->fwdr;
+}
+
 raft_node_id_t raft_get_nodeid(raft_server_t *me)
 {
     return raft_node_get_id(me->node);

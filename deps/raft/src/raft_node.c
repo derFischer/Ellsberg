@@ -12,12 +12,21 @@
 #include "raft.h"
 #include "raft_private.h"
 
+#include <sys/time.h>
+#include <unistd.h>
+#include <stdatomic.h>
+
 #define RAFT_NODE_VOTED_FOR_ME        (1 << 0)
 #define RAFT_NODE_VOTING              (1 << 1)
 #define RAFT_NODE_HAS_SUFFICIENT_LOG  (1 << 2)
 #define RAFT_NODE_INACTIVE            (1 << 3)
 #define RAFT_NODE_VOTING_COMMITTED    (1 << 4)
 #define RAFT_NODE_ADDITION_COMMITTED  (1 << 5)
+
+#define TSLEN  40
+#define CNTLEN 8
+#define SUFFIXLEN (TSLEN + CNTLEN)
+#define REQ_ID_SIZE (sizeof(raft_req_id_t) * 8)
 
 struct raft_node {
     void *udata;
@@ -35,6 +44,12 @@ struct raft_node {
 
     /* Next snapshot offset to send to this node */
     raft_size_t snapshot_offset;
+
+    /* req id */
+    raft_req_id_t reqid_prefix;
+    atomic_uint_fast64_t reqid_suffix;
+    raft_req_id_t next_reqid;
+
 };
 
 raft_node_t *raft_node_new(void *udata, raft_node_id_t id, int voting)
@@ -52,12 +67,25 @@ raft_node_t *raft_node_new(void *udata, raft_node_id_t id, int voting)
     me->id = id;
     raft_node_set_voting(me, voting);
 
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    raft_req_id_t ts_lowbits = (tv.tv_usec << (REQ_ID_SIZE - TSLEN)) >> (REQ_ID_SIZE - TSLEN);
+    me->reqid_prefix = (((raft_req_id_t)me->id) << SUFFIXLEN);
+    atomic_store(&(me->reqid_suffix), ts_lowbits << CNTLEN);
+
     return me;
 }
 
 void raft_node_free(raft_node_t *node)
 {
     raft_free(node);
+}
+
+raft_req_id_t raft_node_next_reqid(raft_node_t *node) {
+    // TODO: use atomic add
+    raft_req_id_t old_suffix = atomic_fetch_add(&(node->reqid_suffix), 1);
+    raft_req_id_t next_suffix = ((old_suffix + 1) << (REQ_ID_SIZE - SUFFIXLEN)) >> (REQ_ID_SIZE - SUFFIXLEN);
+    return node->reqid_prefix | next_suffix;
 }
 
 raft_index_t raft_node_get_next_idx(raft_node_t *node)

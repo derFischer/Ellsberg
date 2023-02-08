@@ -111,6 +111,18 @@ raft_server_t* raft_new_with_log(const raft_log_impl_t *log_impl, void *log_arg)
     me->auto_flush = 1;
     me->exec_deadline = LLONG_MAX;
     me->msg_id = 0;
+    // init forwarder
+    // char *use_forwarder = getenv("USE_FORWARDER");
+    // if (use_forwarder && strcmp(use_forwarder, "1") == 0) {
+        char *IID = getenv("IID");
+        char server_sock_path[1024] = "/tmp/server.sock.";
+        char client_sock_path[1024] = "/tmp/client.sock.";
+        sprintf(server_sock_path, "/tmp/server.%s.sock", IID);
+        sprintf(client_sock_path, "/tmp/client.%s.sock", IID);
+        me->fwdr = forwarder_new(server_sock_path, client_sock_path);
+    // } else {
+    //     me->fwdr = NULL;
+    // }
 
     raft_update_quorum_meta(me, me->msg_id);
 
@@ -154,6 +166,7 @@ void raft_set_callbacks(raft_server_t* me, raft_cbs_t* funcs, void* udata)
 
 void raft_destroy(raft_server_t* me)
 {
+    forwarder_close(me->fwdr);
     me->log_impl->free(me->log);
     raft_free(me);
 }
@@ -1556,7 +1569,6 @@ int raft_send_appendentries(raft_server_t *me, raft_node_t *node)
         }
 
         raft_index_t next_idx = raft_node_get_next_idx(node);
-
         raft_appendentries_req_t req = {
             .term = me->current_term,
             .leader_id = raft_get_nodeid(me),
@@ -2313,4 +2325,9 @@ int raft_restore_log(raft_server_t *me)
     }
 
     return 0;
+}
+
+/* Forwarder */
+void raft_forward(raft_server_t *me, const void *buf, int len) {
+    forwarder_send(me->fwdr, buf, len);
 }

@@ -41,6 +41,11 @@ typedef int raft_node_id_t;
 typedef unsigned long raft_msg_id_t;
 
 /**
+ * Unique request identifier.
+ */
+typedef unsigned long raft_req_id_t;
+
+/**
  * Time type.
  */
 typedef long long raft_time_t;

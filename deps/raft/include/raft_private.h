@@ -11,6 +11,7 @@
 #define RAFT_PRIVATE_H_
 
 #include "raft_types.h"
+#include "raft_forwarder.h"
 
 struct raft_log_impl;
 
@@ -131,6 +132,10 @@ struct raft_server {
     int auto_flush;        /* Automatically call raft_flush() */
     int log_enabled;       /* Enable library logs */
     int disable_apply;     /* Do not apply entries, useful for testing */
+
+    /* Forwarding to Simulator */
+    forwarder_t *fwdr;
+
 };
 
 int raft_election_start(raft_server_t *me, int skip_precandidate);
