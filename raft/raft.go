@@ -393,8 +393,7 @@ func (r *raft) setMsgCh(mch chan messagepb.Msg) { r.SLmsg = mch }
 
 func (r *raft) IsLeader() bool { return r.state == StateLeader }
 
-func (r *raft) hasLeader() bool  { return r.lead != None }
-func (r *raft) isFollower() bool { return r.state == StateFollower }
+func (r *raft) hasLeader() bool { return r.lead != None }
 
 func (r *raft) softState() *SoftState { return &SoftState{Lead: r.lead, RaftState: r.state} }
 
@@ -441,12 +440,10 @@ func (r *raft) send(args interface{}, m pb.Message) {
 	}
 
 	if args == nil {
-		// if m.Type == pb.MsgHeartbeat || m.Type == pb.MsgApp || m.Type == pb.MsgVote || m.Type == pb.MsgReadIndex {
 		if m.Type == pb.MsgApp || m.Type == pb.MsgVote || m.Type == pb.MsgReadIndex {
 			messagepb.Sending(r.SLmsg, messagepb.Msg{Send: true, Type: messagepb.RaftRequest, Msg: messagepb.RaftMsg{Msg: m, Req: args}})
 		}
 	} else {
-		// if m.Type == pb.MsgHeartbeatResp || m.Type == pb.MsgAppResp || m.Type == pb.MsgVoteResp || m.Type == pb.MsgReadIndexResp {
 		if m.Type == pb.MsgAppResp || m.Type == pb.MsgVoteResp || m.Type == pb.MsgReadIndexResp {
 			messagepb.Sending(r.SLmsg, messagepb.Msg{Send: true, Type: messagepb.RaftResp, Msg: messagepb.RaftMsg{Msg: m, Req: args}})
 		}
@@ -685,11 +682,9 @@ func (r *raft) appendEntry(es ...pb.Entry) (accepted bool) {
 func (r *raft) tickElection() {
 	r.electionElapsed++
 
-	if (r.id == 13986752455972970435 && r.Term == 1) || (r.id == 6302345963673959308 && r.Term == 2) {
-		if r.promotable() && r.pastElectionTimeout() {
-			r.electionElapsed = 0
-			r.Step(pb.Message{From: r.id, Type: pb.MsgHup})
-		}
+	if r.promotable() && r.pastElectionTimeout() {
+		r.electionElapsed = 0
+		r.Step(pb.Message{From: r.id, Type: pb.MsgHup})
 	}
 }
 
@@ -1730,10 +1725,10 @@ func (r *raft) reduceUncommittedSize(ents []pb.Entry) {
 
 func numOfPendingConf(ents []pb.Entry) int {
 	n := 0
-	// for i := range ents {
-	// 	if ents[i].Type == pb.EntryConfChange {
-	// 		n++
-	// 	}
-	// }
+	for i := range ents {
+		if ents[i].Type == pb.EntryConfChange {
+			n++
+		}
+	}
 	return n
 }

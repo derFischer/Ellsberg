@@ -164,17 +164,19 @@ func RaftMsgInterpreter(message RaftMsg, send bool) (Message, Ctx) {
 	msg := message.Msg.(raftpb.Message)
 	switch msg.Type {
 	case raftpb.MsgApp:
-		return Message{Type: MsgApp, From: msg.From, To: msg.To, Mterm: msg.Term, Index: msg.Index, IndexTerm: msg.LogTerm, MEntries: CommandsInterpreter(msg.Entries), CommitIndex: msg.Commit}, nil
+		ctx := CtxInterpreter(msg.Context)
+		return Message{Type: MsgApp, From: msg.From, To: msg.To, Mterm: msg.Term, Index: msg.Index, IndexTerm: msg.LogTerm, MEntries: CommandsInterpreter(msg.Entries), CommitIndex: msg.Commit}, ctx
 	case raftpb.MsgAppResp:
+		ctx := CtxInterpreter(msg.Context)
 		if send {
 			req := message.Req.(raftpb.Message)
 			if msg.Reject {
-				return Message{Type: MsgAppResp, From: msg.From, To: msg.To, Mterm: msg.Term, Success: false, MatchIndex: 0, Index: req.Index, IndexTerm: req.LogTerm, MEntries: CommandsInterpreter(req.Entries), CommitIndex: req.Commit, ReqTerm: req.Term}, nil
+				return Message{Type: MsgAppResp, From: msg.From, To: msg.To, Mterm: msg.Term, Success: false, MatchIndex: 0, Index: req.Index, IndexTerm: req.LogTerm, MEntries: CommandsInterpreter(req.Entries), CommitIndex: req.Commit, ReqTerm: req.Term}, ctx
 			} else {
-				return Message{Type: MsgAppResp, From: msg.From, To: msg.To, Mterm: msg.Term, Success: true, MatchIndex: msg.Index, Index: req.Index, IndexTerm: req.LogTerm, MEntries: CommandsInterpreter(req.Entries), CommitIndex: req.Commit, ReqTerm: req.Term}, nil
+				return Message{Type: MsgAppResp, From: msg.From, To: msg.To, Mterm: msg.Term, Success: true, MatchIndex: msg.Index, Index: req.Index, IndexTerm: req.LogTerm, MEntries: CommandsInterpreter(req.Entries), CommitIndex: req.Commit, ReqTerm: req.Term}, ctx
 			}
 		} else {
-			return Message{Type: MsgAppResp, From: msg.From, To: msg.To, Mterm: msg.Term, Success: !msg.Reject, MatchIndex: msg.Index}, nil
+			return Message{Type: MsgAppResp, From: msg.From, To: msg.To, Mterm: msg.Term, Success: !msg.Reject, MatchIndex: msg.Index}, ctx
 		}
 	case raftpb.MsgVote:
 		return Message{Type: MsgVote, From: msg.From, To: msg.To, Mterm: msg.Term, Index: msg.Index, IndexTerm: msg.LogTerm}, nil

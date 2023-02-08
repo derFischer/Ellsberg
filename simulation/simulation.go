@@ -71,18 +71,16 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 	}
 
 	//hack the initial state
-	lg := make([]statepb.Command, 6)
-	lg[0] = statepb.Command{CommandIndex: 0}
-	lg[1] = statepb.Command{CommandIndex: 1}
-	lg[2] = statepb.Command{CommandIndex: 2}
-	lg[3] = statepb.Command{CommandIndex: 3}
-	lg[4] = statepb.Command{CommandIndex: 4}
-	lg[5] = statepb.Command{CommandIndex: 5, CommandTerm: 1}
+	lg := make([]statepb.Command, len(peers)+1)
+	for i := 0; i <= len(peers); i++ {
+		lg[i] = statepb.Command{CommandIndex: uint64(i)}
+	}
+	lg[len(peers)].CommandTerm = 1
 
 	sl := new(Simulation)
 	sl.me = id
 	sl.States = make([]*partialOrder.Start, 1)
-	sl.States[0] = &partialOrder.Start{States: &state.State{Me: id, State: statepb.Follower, CurrentTerm: 1, VotedFor: state.NOONE, Votes: votes, Log: lg, CommitIndex: 5, MmatchIndex: matchIndex, Peers: peers, Quorum: q}}
+	sl.States[0] = &partialOrder.Start{States: &state.State{Me: id, State: statepb.Follower, CurrentTerm: 1, VotedFor: state.NOONE, Votes: votes, Log: lg, CommitIndex: lg[len(peers)].CommandIndex, MmatchIndex: matchIndex, Peers: peers, Quorum: q}}
 	sl.MsgCh = make(chan messagepb.Msg)
 	sl.Connections = alive
 	sl.ReadIndex = rindex
@@ -102,7 +100,6 @@ func StartSimulationServer(id uint64, peers []uint64) *Simulation {
 				if msg.Send {
 					// fmt.Printf("trying to send message: %+v\n", msg)
 					sl.sendMsg(msg)
-					// fmt.Printf("send message check finished\n")
 				} else {
 					//fmt.Printf("!!!!!!!!!!!!!!!!receive the msg: %+v\n", msg)
 					// fmt.Printf("receive the message: %+v\n", msg)

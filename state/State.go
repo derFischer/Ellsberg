@@ -173,10 +173,10 @@ func (s *State) ApplyReconfChange(changes []statepb.ReconfigChange) {
 			//case 1: a single change, do not need to enter joint quorum:
 			change := changes[0]
 			if change.Type == statepb.AddNode {
-				if inSlice(new_peers, change.Node) != -1 {
+				if inSlice(new_peers, change.Node) == -1 {
 					new_peers = append(new_peers, change.Node)
 				}
-				if inSlice(q[0], change.Node) != -1 {
+				if inSlice(q[0], change.Node) == -1 {
 					q[0] = append(q[0], change.Node)
 				}
 			}
@@ -305,7 +305,7 @@ func (s *State) UpdateCommitIndex() {
 			command := s.GetCommand(majority)
 			if command.CommandTerm == s.CurrentTerm {
 				s.CommitIndex = max(command.CommandIndex, s.CommitIndex)
-				for i := old_commit; i <= s.CommitIndex; i++ {
+				for i := old_commit + 1; i <= s.CommitIndex; i++ {
 					c := s.GetCommand(i)
 					if c.Command.Type == statepb.EntryConfChange {
 						//if this is a single change or leave joint, apply it asap.
