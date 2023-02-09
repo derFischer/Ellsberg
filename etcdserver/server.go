@@ -491,7 +491,7 @@ func NewServer(cfg ServerConfig) (srv *EtcdServer, err error) {
 	var usedSlConn net.Conn = nil
 	if useSim {
 		// slConn, err := net.Dial("tcp", "127.0.0.1:9090")
-		instanceId := os.Getenv("INSTANCE_ID")
+		instanceId := os.Getenv("IID")
 		server_sock_path := fmt.Sprintf("/tmp/server.%s.sock", instanceId)
 		slConn, err := net.Dial("unix", server_sock_path)
 		if err != nil {
