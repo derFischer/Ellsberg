@@ -133,6 +133,7 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 		interpreter.NetWrite(s.slConn, tosend)
 	}
 	if !r.Serializable {
+		// hack: stale read
 		// if !s.r.IsLeader() {
 		// 	err = s.linearizableReadNotify(ctx)
 		// 	trace.Step("agreement among raft nodes before linearized reading")

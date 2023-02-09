@@ -717,13 +717,13 @@ func (r *raft) appendEntry(es ...pb.Entry) (accepted bool) {
 func (r *raft) tickElection() {
 	r.electionElapsed++
 
-	// hack:
-	if (r.id == 13986752455972970435 && r.Term == 1) || (r.id == 6302345963673959308 && r.Term == 2) {
-		if r.promotable() && r.pastElectionTimeout() {
-			r.electionElapsed = 0
-			r.Step(pb.Message{From: r.id, Type: pb.MsgHup})
-		}
+	// hack: reconfig
+	// if (r.id == 13986752455972970435 && r.Term == 1) || (r.id == 6302345963673959308 && r.Term == 2) {
+	if r.promotable() && r.pastElectionTimeout() {
+		r.electionElapsed = 0
+		r.Step(pb.Message{From: r.id, Type: pb.MsgHup})
 	}
+	// }
 }
 
 // tickHeartbeat is run by leaders to send a MsgBeat after r.heartbeatTimeout.
@@ -1070,20 +1070,21 @@ func stepLeader(r *raft, m pb.Message) error {
 		// leader steps down when removing itself. I might be missing something.
 
 		//hack: delete this part
-		// if pr := r.prs.Progress[r.id]; pr != nil {
-		// 	pr.RecentActive = true
-		// }
-		// if !r.prs.QuorumActive() {
-		// 	r.logger.Warningf("%x stepped down to follower since quorum is not active", r.id)
-		// 	r.becomeFollower(r.Term, None)
-		// }
-		// // Mark everyone (but ourselves) as inactive in preparation for the next
-		// // CheckQuorum.
-		// r.prs.Visit(func(id uint64, pr *tracker.Progress) {
-		// 	if id != r.id {
-		// 		pr.RecentActive = false
-		// 	}
-		// })
+		if pr := r.prs.Progress[r.id]; pr != nil {
+			pr.RecentActive = true
+		}
+		if !r.prs.QuorumActive() {
+			r.logger.Warningf("%x stepped down to follower since quorum is not active", r.id)
+			// hack: stale read (correct version should include becomeFollower)
+			r.becomeFollower(r.Term, None)
+		}
+		// Mark everyone (but ourselves) as inactive in preparation for the next
+		// CheckQuorum.
+		r.prs.Visit(func(id uint64, pr *tracker.Progress) {
+			if id != r.id {
+				pr.RecentActive = false
+			}
+		})
 
 		return nil
 	case pb.MsgProp:
@@ -1763,11 +1764,11 @@ func (r *raft) reduceUncommittedSize(ents []pb.Entry) {
 
 func numOfPendingConf(ents []pb.Entry) int {
 	n := 0
-	// hack:
-	// for i := range ents {
-	// 	if ents[i].Type == pb.EntryConfChange {
-	// 		n++
-	// 	}
-	// }
+	// hack: reconfig
+	for i := range ents {
+		if ents[i].Type == pb.EntryConfChange {
+			n++
+		}
+	}
 	return n
 }
