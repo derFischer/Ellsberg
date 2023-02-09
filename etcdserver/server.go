@@ -16,11 +16,13 @@ package etcdserver
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"expvar"
 	"fmt"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -48,6 +50,7 @@ import (
 	"go.etcd.io/etcd/v3/etcdserver/api/v3compactor"
 	"go.etcd.io/etcd/v3/etcdserver/cindex"
 	pb "go.etcd.io/etcd/v3/etcdserver/etcdserverpb"
+	"go.etcd.io/etcd/v3/interpreter"
 	"go.etcd.io/etcd/v3/lease"
 	"go.etcd.io/etcd/v3/lease/leasehttp"
 	"go.etcd.io/etcd/v3/messagepb"
@@ -63,7 +66,6 @@ import (
 	"go.etcd.io/etcd/v3/pkg/wait"
 	"go.etcd.io/etcd/v3/raft"
 	"go.etcd.io/etcd/v3/raft/raftpb"
-	"go.etcd.io/etcd/v3/simulation"
 	"go.etcd.io/etcd/v3/version"
 	"go.etcd.io/etcd/v3/wal"
 )
@@ -197,10 +199,9 @@ type EtcdServer struct {
 
 	consistIndex cindex.ConsistentIndexer // consistIndex is used to get/set/save consistentIndex
 	r            raftNode                 // uses 64-bit atomics; keep 64-bit aligned.
-	sl           *simulation.Simulation
 
 	//simulation msg chan
-	SLmsg chan messagepb.Msg
+	slConn net.Conn
 
 	readych chan struct{}
 	Cfg     ServerConfig
@@ -486,8 +487,30 @@ func NewServer(cfg ServerConfig) (srv *EtcdServer, err error) {
 
 	heartbeat := time.Duration(cfg.TickMs) * time.Millisecond
 
-	sl := simulation.StartSimulationServer(uint64(id), types.IDToUINT(cl.MemberIDs()))
-	n.SetMsgCh(sl.MsgCh)
+	useSim := true
+	var usedSlConn net.Conn = nil
+	if useSim {
+		// slConn, err := net.Dial("tcp", "127.0.0.1:9090")
+		instanceId := os.Getenv("INSTANCE_ID")
+		server_sock_path := fmt.Sprintf("/tmp/server.%s.sock", instanceId)
+		slConn, err := net.Dial("unix", server_sock_path)
+		if err != nil {
+			fmt.Printf("\033[1;31mWarning: cannot connect to simulator!\033[0m\n")
+		} else {
+			fmt.Printf("Connected to simulator, %v\n", slConn)
+			marshalled_cluster_info, err := json.Marshal(types.IDToUINT(cl.MemberIDs()))
+			interpreter.PanicIfMarshalError(err)
+			// write my id
+			interpreter.NetWrite(slConn, interpreter.EncodeUint64(uint64(id)))
+			// write cluster info length
+			interpreter.NetWrite(slConn, interpreter.EncodeUint64(uint64(len(marshalled_cluster_info))))
+			// write cluster info
+			interpreter.NetWrite(slConn, marshalled_cluster_info)
+			usedSlConn = slConn
+		}
+	}
+
+	n.SetSlConn(usedSlConn)
 
 	srv = &EtcdServer{
 		readych:     make(chan struct{}),
@@ -507,8 +530,7 @@ func NewServer(cfg ServerConfig) (srv *EtcdServer, err error) {
 				storage:     NewStorage(w, ss),
 			},
 		),
-		sl:               sl,
-		SLmsg:            sl.MsgCh,
+		slConn:           usedSlConn,
 		id:               id,
 		attributes:       membership.Attributes{Name: cfg.Name, ClientURLs: cfg.ClientURLs.StringSlice()},
 		cluster:          cl,
@@ -845,8 +867,20 @@ func (s *EtcdServer) Process(ctx context.Context, m raftpb.Message) error {
 		s.stats.RecvAppendReq(types.ID(m.From).String(), m.Size())
 	}
 	if m.Type == raftpb.MsgAppResp || m.Type == raftpb.MsgVoteResp || m.Type == raftpb.MsgReadIndexResp {
-		// if m.Type == raftpb.MsgAppResp || m.Type == raftpb.MsgVoteResp || m.Type == raftpb.MsgReadIndexResp {
-		messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.RaftRequest, Msg: messagepb.RaftMsg{Msg: m, Req: nil}})
+		// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.RaftRequest, Msg: messagepb.RaftMsg{Msg: m, Req: nil}})
+		if s.slConn != nil {
+			lengths := 8 + 8*3 + 8 + (uint64)(m.Size()) + 8 + 0
+			tosend := make([]byte, lengths)
+			copy(tosend[:8], []byte("nyusimul"))                                          // nyusimul
+			binary.LittleEndian.PutUint64(tosend[8:16], lengths-16)                       // lengths
+			binary.LittleEndian.PutUint64(tosend[16:24], (uint64)(0))                     // Send = false
+			binary.LittleEndian.PutUint64(tosend[24:32], (uint64)(messagepb.RaftRequest)) // Type
+			binary.LittleEndian.PutUint64(tosend[32:40], (uint64)(m.Size()))              // Msg size
+			_, err := m.MarshalTo(tosend[40:])                                            // Msg
+			interpreter.PanicIfMarshalError(err)
+			binary.LittleEndian.PutUint64(tosend[40+m.Size():48+m.Size()], 0) // Req size
+			interpreter.NetWrite(s.slConn, tosend)
+		}
 	}
 	return s.r.Step(ctx, m)
 }
@@ -1744,7 +1778,22 @@ func (s *EtcdServer) configure(ctx context.Context, cc raftpb.ConfChange) ([]*me
 	cc.ID = s.reqIDGen.Next()
 	ch := s.w.Register(cc.ID)
 
-	messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.ClientRequest, Msg: messagepb.ClientReq{Req: &cc, ID: cc.ID}})
+	// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.ClientRequest, Msg: messagepb.ClientReq{Req: &cc, ID: cc.ID}})
+
+	if s.slConn != nil {
+		lengths := 8 + 8*3 + 8 + 8 + 8 + (uint64)(cc.Size())
+		tosend := make([]byte, lengths)
+		copy(tosend[:8], []byte("nyusimul"))                                            // 8: nyusimul
+		binary.LittleEndian.PutUint64(tosend[8:16], lengths-16)                         // 8: length
+		binary.LittleEndian.PutUint64(tosend[16:24], 0)                                 // 8: send
+		binary.LittleEndian.PutUint64(tosend[24:32], (uint64)(messagepb.ClientRequest)) // 8: type
+		binary.LittleEndian.PutUint64(tosend[32:40], 2)                                 // 8: 2 from [InternalRaftRequest, ClientRequest, ConfChange]
+		binary.LittleEndian.PutUint64(tosend[40:48], cc.ID)                             // 8: Req Id
+		binary.LittleEndian.PutUint64(tosend[48:56], (uint64)(cc.Size()))               // 8: Req size
+		_, err := cc.MarshalTo(tosend[56:])                                             // r.Size(): Req
+		interpreter.PanicIfMarshalError(err)
+		interpreter.NetWrite(s.slConn, tosend)
+	}
 
 	start := time.Now()
 	if err := s.r.ProposeConfChange(ctx, cc); err != nil {

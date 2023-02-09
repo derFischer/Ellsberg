@@ -17,8 +17,8 @@ package raft
 import (
 	"context"
 	"errors"
+	"net"
 
-	"go.etcd.io/etcd/v3/messagepb"
 	pb "go.etcd.io/etcd/v3/raft/raftpb"
 )
 
@@ -206,7 +206,7 @@ type Node interface {
 
 	IsLeader() bool
 
-	SetMsgCh(mch chan messagepb.Msg)
+	SetSlConn(slConn net.Conn)
 }
 
 type Peer struct {
@@ -290,7 +290,7 @@ func newNode(rn *RawNode) node {
 	}
 }
 
-func (n *node) SetMsgCh(mch chan messagepb.Msg) { n.rn.raft.setMsgCh(mch) }
+func (n *node) SetSlConn(slConn net.Conn) { n.rn.raft.setSlConn(slConn) }
 
 func (n *node) Stop() {
 	select {

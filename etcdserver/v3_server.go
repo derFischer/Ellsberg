@@ -25,6 +25,7 @@ import (
 	"go.etcd.io/etcd/v3/etcdserver/api/membership"
 	"go.etcd.io/etcd/v3/etcdserver/api/membership/membershippb"
 	pb "go.etcd.io/etcd/v3/etcdserver/etcdserverpb"
+	"go.etcd.io/etcd/v3/interpreter"
 	"go.etcd.io/etcd/v3/lease"
 	"go.etcd.io/etcd/v3/lease/leasehttp"
 	"go.etcd.io/etcd/v3/messagepb"
@@ -115,8 +116,22 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 
 	id := s.reqSLROIDGen.Next()
 	//reply checker
-	messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.ClientRequest, Msg: messagepb.ClientReq{Req: r, ID: id}})
+	// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.ClientRequest, Msg: messagepb.ClientReq{Req: r, ID: id}})
 
+	if s.slConn != nil {
+		lengths := 8 + 8*3 + 8 + 8 + 8 + (uint64)(r.Size())
+		tosend := make([]byte, lengths)
+		copy(tosend[:8], []byte("nyusimul"))                                            // 8: nyusimul
+		binary.LittleEndian.PutUint64(tosend[8:16], lengths-16)                         // 8: length
+		binary.LittleEndian.PutUint64(tosend[16:24], 0)                                 // 8: send
+		binary.LittleEndian.PutUint64(tosend[24:32], (uint64)(messagepb.ClientRequest)) // 8: type
+		binary.LittleEndian.PutUint64(tosend[32:40], 1)                                 // 8: 1 from [InternalRaftRequest, ClientRequest, ConfChange]
+		binary.LittleEndian.PutUint64(tosend[40:48], id)                                // 8: Req Id
+		binary.LittleEndian.PutUint64(tosend[48:56], (uint64)(r.Size()))                // 8: Req size
+		_, err = r.MarshalTo(tosend[56:])                                               // r.Size(): Req
+		interpreter.PanicIfMarshalError(err)
+		interpreter.NetWrite(s.slConn, tosend)
+	}
 	if !r.Serializable {
 		// if !s.r.IsLeader() {
 		// 	err = s.linearizableReadNotify(ctx)
@@ -141,7 +156,37 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 		return nil, err
 	}
 	//check reply here
-	messagepb.Sending(s.SLmsg, messagepb.Msg{Send: true, Type: messagepb.ClientResp, Msg: messagepb.ClientReply{Reply: resp, ID: id}})
+	// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: true, Type: messagepb.ClientResp, Msg: messagepb.ClientReply{Reply: resp, ID: id}})
+	if s.slConn != nil {
+		var data []byte
+		replySize := uint64(0)
+		if resp == nil {
+			replySize = 0
+			data = make([]byte, 0)
+		} else {
+			data, err = proto.Marshal(resp)
+			interpreter.PanicIfMarshalError(err)
+			replySize = uint64(len(data))
+		}
+
+		lengths := 8 + 8*3 + 8 + 8 + 8 + replySize
+		tosend := make([]byte, lengths)
+		copy(tosend[:8], []byte("nyusimul"))                                           // nyusimul
+		binary.LittleEndian.PutUint64(tosend[8:16], lengths-16)                        // length
+		binary.LittleEndian.PutUint64(tosend[16:24], 1)                                // send
+		binary.LittleEndian.PutUint64(tosend[24:32], (uint64)(messagepb.ClientResp))   // type
+		binary.LittleEndian.PutUint64(tosend[32:40], id)                               // Reply Id
+		binary.LittleEndian.PutUint64(tosend[40:48], interpreter.ClientRespType(resp)) // Reply Type
+		if resp == nil {
+			binary.LittleEndian.PutUint64(tosend[48:56], 0) // Reply size
+			// Reply is empty
+		} else {
+			binary.LittleEndian.PutUint64(tosend[48:56], replySize) // Reply size
+			copy(tosend[56:], data)
+		}
+		interpreter.PanicIfMarshalError(err)
+		interpreter.NetWrite(s.slConn, tosend)
+	}
 	return resp, err
 }
 
@@ -675,7 +720,7 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 		r.Header.Username = authInfo.Username
 		r.Header.AuthRevision = authInfo.Revision
 	}
-	messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.ClientRequest, Msg: messagepb.ClientReq{Req: r, ID: r.Header.ID}})
+	// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.ClientRequest, Msg: messagepb.ClientReq{Req: r, ID: r.Header.ID}})
 
 	data, err := r.Marshal()
 	if err != nil {
@@ -684,6 +729,21 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 
 	if len(data) > int(s.Cfg.MaxRequestBytes) {
 		return nil, ErrRequestTooLarge
+	}
+
+	if s.slConn != nil {
+		lengths := 8 + 8*3 + 8 + 8 + 8 + (uint64)(r.Size())
+		tosend := make([]byte, lengths)
+		copy(tosend[:8], []byte("nyusimul"))                                            // 8: nyusimul
+		binary.LittleEndian.PutUint64(tosend[8:16], lengths-16)                         // 8: length
+		binary.LittleEndian.PutUint64(tosend[16:24], 0)                                 // 8: send
+		binary.LittleEndian.PutUint64(tosend[24:32], (uint64)(messagepb.ClientRequest)) // 8: type
+		binary.LittleEndian.PutUint64(tosend[32:40], 0)                                 // 8: 0 from [InternalRaftRequest, ClientRequest, ConfChange]
+		binary.LittleEndian.PutUint64(tosend[40:48], r.Header.ID)                       // 8: Req Id
+		binary.LittleEndian.PutUint64(tosend[48:56], (uint64)(r.Size()))                // 8: Req size
+		_, err = r.MarshalTo(tosend[56:])                                               // r.Size(): Req
+		interpreter.PanicIfMarshalError(err)
+		interpreter.NetWrite(s.slConn, tosend)
 	}
 
 	id := r.ID
@@ -708,7 +768,38 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 
 	select {
 	case x := <-ch:
-		messagepb.Sending(s.SLmsg, messagepb.Msg{Send: true, Type: messagepb.ClientResp, Msg: messagepb.ClientReply{Reply: (x.(*applyResult)).resp, ID: r.Header.ID}})
+		// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: true, Type: messagepb.ClientResp, Msg: messagepb.ClientReply{Reply: (x.(*applyResult)).resp, ID: r.Header.ID}})
+		if s.slConn != nil {
+			resp := (x.(*applyResult)).resp
+			var data []byte
+			replySize := uint64(0)
+			if resp == nil {
+				replySize = 0
+				data = make([]byte, 0)
+			} else {
+				data, err = proto.Marshal(resp)
+				interpreter.PanicIfMarshalError(err)
+				replySize = uint64(len(data))
+			}
+
+			lengths := 8 + 8*3 + 8 + 8 + 8 + replySize
+			tosend := make([]byte, lengths)
+			copy(tosend[:8], []byte("nyusimul"))                                           // nyusimul
+			binary.LittleEndian.PutUint64(tosend[8:16], lengths-16)                        // length
+			binary.LittleEndian.PutUint64(tosend[16:24], 1)                                // send
+			binary.LittleEndian.PutUint64(tosend[24:32], (uint64)(messagepb.ClientResp))   // type
+			binary.LittleEndian.PutUint64(tosend[32:40], r.Header.ID)                      // Reply Id
+			binary.LittleEndian.PutUint64(tosend[40:48], interpreter.ClientRespType(resp)) // Reply Type
+			if resp == nil {
+				binary.LittleEndian.PutUint64(tosend[48:56], 0) // Reply size
+				// Reply is empty
+			} else {
+				binary.LittleEndian.PutUint64(tosend[48:56], replySize) // Reply size
+				copy(tosend[56:], data)
+			}
+			interpreter.PanicIfMarshalError(err)
+			interpreter.NetWrite(s.slConn, tosend)
+		}
 		return x.(*applyResult), nil
 	case <-cctx.Done():
 		proposalsFailed.Inc()
