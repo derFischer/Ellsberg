@@ -344,7 +344,7 @@ sds InterpreteRVR(
   const char** argv_tosend = (const char**)calloc(more_argc+argc, sizeof(char*));
   int argc_tosend = argc + more_argc;
   // send=false
-  argv_tosend[0] = "0"; 
+  argv_tosend[0] = send ? "1" : "0"; ; 
   // msg_type: RaftResponse
   argv_tosend[1] = "4";
   // TODO: msg_id
