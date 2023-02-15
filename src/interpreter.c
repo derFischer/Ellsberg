@@ -152,7 +152,7 @@ sds InterpreteRaftNode(raft_server_t *raft, bool send, bool add, size_t req_id, 
   redisFormatSdsCommandArgv(&cmd, argc_tosend, argv_tosend, NULL);
   
   sds replaced = DupAndReplaceSplitter(cmd, 0);
-  printf("[%s] RaftNode(%s): < %s >\n", send ? "send" : "recv", add ? "ADD" : "REMOVE", replaced);
+  printf("[%s] RaftNode(%s): < %s >\n", send ? "send" : "recv", add ? "ADDVOTING" : "REMOVE", replaced);
 
   sdsfree(replaced);
   free(argv_tosend);

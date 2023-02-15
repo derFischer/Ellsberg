@@ -8,6 +8,7 @@
 #include "log.h"
 #include "redisraft.h"
 #include "interpreter.h"
+#include "raft_private.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -874,7 +875,12 @@ static int raftSendAppendEntries(raft_server_t *raft, void *user_data,
                               node, argc, (const char **) argv, argvlen) != REDIS_OK) {
         NODE_TRACE(node, "failed appendentries");
     } else {
-        if (raft_get_forwarder(raft)) {
+        //if nonvoting, ignore the message
+        raft_index_t match_idx = raft_node_get_match_idx(raft_node);
+        raft_index_t last_idx = msg->prev_log_idx;
+        raft_entry_t *ety = raft_get_entry_from_idx(raft, last_idx);
+
+        if (raft_get_forwarder(raft) && (match_idx < last_idx) && ety->type == RAFT_LOGTYPE_ADD_NONVOTING_NODE) {
             // Sending(send append entries)
             sds joined_req_ids;
             if (msg->n_entries > 0) {
@@ -992,20 +998,35 @@ static int raftApplyLog(raft_server_t *raft, void *user_data, raft_entry_t *entr
                 // raft_forward(raft, &cmd_len, sizeof(size_t));
                 // raft_forward(raft, cmd, cmd_len);
                 // sdsfree(cmd);
-            }
-            RaftReqFree(req);
-            break;
-        case RAFT_LOGTYPE_ADD_NODE:
-            cfg = (RaftCfgChange *) entry->data;
-            if (raft_get_forwarder(rr->raft) && raft_is_leader(rr->raft)) {
-                printf("send node add reply (voting) node_id=%d\n", cfg->id);
-                // Sending(send node add reply (voting))
-                sds cmd = InterpreteRaftNodeReply(raft, /*send=*/true, /*add=*/true, entry->req_id, cfg->id, rr->snapshot_info.dbid);
+                raft_add_node_req_t* req = raft_get_add_node_req_id(raft, cfg->id);
+                raft_index_t req_id = 0;
+                if (req != NULL) {
+                    req_id = req->req_id;
+                }
+                sds cmd = InterpreteRaftNodeReply(raft, /*send=*/true, /*add=*/true, req_id, cfg->id, rr->snapshot_info.dbid);
                 size_t cmd_len = sdslen(cmd);
                 raft_forward(raft, &cmd_len, sizeof(size_t));
                 raft_forward(raft, cmd, cmd_len);
                 sdsfree(cmd);
             }
+            RaftReqFree(req);
+            break;
+        case RAFT_LOGTYPE_ADD_NODE:
+            // cfg = (RaftCfgChange *) entry->data;
+            // if (raft_get_forwarder(rr->raft) && raft_is_leader(rr->raft)) {
+            //     printf("send node add reply (voting) node_id=%d\n", cfg->id);
+            //     // Sending(send node add reply (voting))
+            //     raft_add_node_req_t* req = raft_get_add_node_req_id(raft, cfg->id);
+            //     raft_index_t req_id = 0;
+            //     if (req != NULL) {
+            //         req_id = req->req_id;
+            //     }
+            //     sds cmd = InterpreteRaftNodeReply(raft, /*send=*/true, /*add=*/true, req_id, cfg->id, rr->snapshot_info.dbid);
+            //     size_t cmd_len = sdslen(cmd);
+            //     raft_forward(raft, &cmd_len, sizeof(size_t));
+            //     raft_forward(raft, cmd, cmd_len);
+            //     sdsfree(cmd);
+            // }
             break;
         case RAFT_LOGTYPE_REMOVE_NODE:
             req = entryDetachRaftReq(rr, entry);
@@ -1104,21 +1125,6 @@ static int raftNodeHasSufficientLogs(raft_server_t *raft, void *user_data, raft_
     cfgchange->addr = node->addr;
 
     int e = raft_recv_entry(raft, entry, NULL);
-
-    if (raft_get_forwarder(raft)) {
-        printf("recv node add reply (voting)\n");
-        // Sending(recv node add (voting))
-        size_t argc = 3;
-        char** argv = (char**)calloc(argc, sizeof(char*));
-        argv[0] = "RAFT.NODE";
-        argv[1] = "ADDVOTING";
-        argv[2] = sdsfromlonglong(node->id);
-        sds cmd = InterpreteRaftNode(raft, false, /*add=*/true, /*req_id=*/entry->req_id, NULL, argv, argc);
-        size_t cmd_len = sdslen(cmd);
-        raft_forward(raft, &cmd_len, sizeof(size_t));
-        raft_forward(raft, cmd, cmd_len);
-        sdsfree(cmd);
-    }
 
     raft_entry_release(entry);
 

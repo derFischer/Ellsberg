@@ -50,12 +50,14 @@ forwarder_t *forwarder_new(char *server_path, char *client_path) {
 }
 
 void forwarder_send(forwarder_t *fwdr, const void *buf, int len) { 
+  printf("writing...");
   int rc = send(fwdr->sock, buf, len, 0);
   if (rc == -1) {
     printf("SEND ERROR = %d\n", errno);
     close(fwdr->sock);
     exit(1);
   }
+  printf("done\n");
 }
 
 void forwarder_recv(forwarder_t *fwdr, void *buf, int len) {

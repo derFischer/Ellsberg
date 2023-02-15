@@ -167,6 +167,7 @@ static int cmdRaftNode(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
             raft_forward(rr->raft, &cmd_len, sizeof(size_t));
             raft_forward(rr->raft, cmd, cmd_len);
             sdsfree(cmd);
+            raft_add_node_req(rr->raft, node_id, entry->req_id);
         }
 
         raft_entry_release(entry);
@@ -1098,6 +1099,9 @@ static int cmdRaftAppendEntries(RedisModuleCtx *ctx, RedisModuleString **argv, i
     RedisModule_ReplyWithLongLong(ctx, resp.current_idx);
     RedisModule_ReplyWithLongLong(ctx, resp.msg_id);
     if (raft_get_forwarder(rr->raft)) {
+        if (resp.success == false) {
+            printf("reply false to appreq: last index: %ld\n", raft_get_current_idx(rr->raft));
+        }
         // Sending(send appendentries reply)
         sds cmd = InterpreteAER(rr->raft, true, msg.msg_id, &resp, /*dst_id=*/src_node_id, /*src_id=*/target_node_id, argv, NULL, argc);
         size_t cmd_len = sdslen(cmd);
