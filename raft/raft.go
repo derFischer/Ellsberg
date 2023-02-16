@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"net"
 	"sort"
 	"strings"
 	"sync"
@@ -324,7 +323,7 @@ type raft struct {
 	logger Logger
 
 	//simulation
-	slConn net.Conn
+	slConn *interpreter.RPCConnection
 }
 
 func newRaft(c *Config) *raft {
@@ -392,7 +391,7 @@ func newRaft(c *Config) *raft {
 	return r
 }
 
-func (r *raft) setSlConn(slConn net.Conn) { r.slConn = slConn }
+func (r *raft) setSlConn(slConn *interpreter.RPCConnection) { r.slConn = slConn }
 
 func (r *raft) IsLeader() bool { return r.state == StateLeader }
 
@@ -449,17 +448,16 @@ func (r *raft) send(args interface{}, m pb.Message) {
 			// messagepb.Sending(r.SLmsg, messagepb.Msg{Send: true, Type: messagepb.RaftRequest, Msg: messagepb.RaftMsg{Msg: m, Req: args}})
 
 			if r.slConn != nil {
-				lengths := 8 + 8*3 + 8 + (uint64)(m.Size()) + 8 + 0
-				tosend := make([]byte, lengths)
-				copy(tosend[:8], []byte("nyusimul"))                                          // nyusimul
-				binary.LittleEndian.PutUint64(tosend[8:16], lengths-16)                       // lengths
-				binary.LittleEndian.PutUint64(tosend[16:32], (uint64)(1))                     // Send = true
-				binary.LittleEndian.PutUint64(tosend[24:32], (uint64)(messagepb.RaftRequest)) // Type
-				binary.LittleEndian.PutUint64(tosend[32:40], (uint64)(m.Size()))              // Msg size
-				_, err := m.MarshalTo(tosend[40:])                                            // Msg
+				length := 8*3 + (uint64)(m.Size()) + 8 + 0
+				reqId, tosend, offset := r.slConn.AllocateRequest(length)
+				binary.LittleEndian.PutUint64(tosend[offset+0:offset+8], (uint64)(1))                      // Send = true
+				binary.LittleEndian.PutUint64(tosend[offset+8:offset+16], (uint64)(messagepb.RaftRequest)) // Type
+				binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], (uint64)(m.Size()))             // Msg size
+				_, err := m.MarshalTo(tosend[offset+24:])                                                  // Msg
 				interpreter.PanicIfMarshalError(err)
-				binary.LittleEndian.PutUint64(tosend[40+m.Size():48+m.Size()], 0) // Req size
-				interpreter.NetWrite(r.slConn, tosend)
+				binary.LittleEndian.PutUint64(tosend[offset+24+m.Size():offset+32+m.Size()], 0) // Req size
+				r.slConn.Request(tosend)
+				r.slConn.WaitFor(reqId)
 			}
 		}
 	} else {
@@ -467,19 +465,18 @@ func (r *raft) send(args interface{}, m pb.Message) {
 			// messagepb.Sending(r.SLmsg, messagepb.Msg{Send: true, Type: messagepb.RaftResp, Msg: messagepb.RaftMsg{Msg: m, Req: args}})
 			if r.slConn != nil {
 				req := args.(pb.Message)
-				lengths := 8 + 8*3 + 8 + (uint64)(m.Size()) + 8 + (uint64)(req.Size())
-				tosend := make([]byte, lengths)
-				copy(tosend[:8], []byte("nyusimul"))                                          // nyusimul
-				binary.LittleEndian.PutUint64(tosend[8:16], lengths-16)                       // lengths
-				binary.LittleEndian.PutUint64(tosend[16:24], (uint64)(1))                     // Send = true
-				binary.LittleEndian.PutUint64(tosend[24:32], (uint64)(messagepb.RaftRequest)) // Type
-				binary.LittleEndian.PutUint64(tosend[32:40], (uint64)(m.Size()))              // Msg size
-				_, err := m.MarshalTo(tosend[40:])                                            // Msg
+				length := 8*3 + (uint64)(m.Size()) + 8 + (uint64)(req.Size())
+				reqId, tosend, offset := r.slConn.AllocateRequest(length)
+				binary.LittleEndian.PutUint64(tosend[offset+0:offset+8], (uint64)(1))                      // Send = true
+				binary.LittleEndian.PutUint64(tosend[offset+8:offset+16], (uint64)(messagepb.RaftRequest)) // Type
+				binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], (uint64)(m.Size()))             // Msg size
+				_, err := m.MarshalTo(tosend[offset+24:])                                                  // Msg
 				interpreter.PanicIfMarshalError(err)
-				binary.LittleEndian.PutUint64(tosend[40+m.Size():48+m.Size()], (uint64)(req.Size())) // Req size
-				_, err = req.MarshalTo(tosend[48+m.Size():])                                         // Resp
+				binary.LittleEndian.PutUint64(tosend[offset+24+m.Size():offset+32+m.Size()], (uint64)(req.Size())) // Req size
+				_, err = req.MarshalTo(tosend[offset+32+m.Size():])                                                // Resp
 				interpreter.PanicIfMarshalError(err)
-				interpreter.NetWrite(r.slConn, tosend)
+				r.slConn.Request(tosend)
+				r.slConn.WaitFor(reqId)
 			}
 		}
 	}

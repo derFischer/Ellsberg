@@ -119,18 +119,17 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 	// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.ClientRequest, Msg: messagepb.ClientReq{Req: r, ID: id}})
 
 	if s.slConn != nil {
-		lengths := 8 + 8*3 + 8 + 8 + 8 + (uint64)(r.Size())
-		tosend := make([]byte, lengths)
-		copy(tosend[:8], []byte("nyusimul"))                                            // 8: nyusimul
-		binary.LittleEndian.PutUint64(tosend[8:16], lengths-16)                         // 8: length
-		binary.LittleEndian.PutUint64(tosend[16:24], 0)                                 // 8: send
-		binary.LittleEndian.PutUint64(tosend[24:32], (uint64)(messagepb.ClientRequest)) // 8: type
-		binary.LittleEndian.PutUint64(tosend[32:40], 1)                                 // 8: 1 from [InternalRaftRequest, ClientRequest, ConfChange]
-		binary.LittleEndian.PutUint64(tosend[40:48], id)                                // 8: Req Id
-		binary.LittleEndian.PutUint64(tosend[48:56], (uint64)(r.Size()))                // 8: Req size
-		_, err = r.MarshalTo(tosend[56:])                                               // r.Size(): Req
+		length := 8*3 + 8 + 8 + (uint64)(r.Size())
+		reqId, tosend, offset := s.slConn.AllocateRequest(length)
+		binary.LittleEndian.PutUint64(tosend[offset+0:offset+8], 0)                                  // 8: send
+		binary.LittleEndian.PutUint64(tosend[offset+8:offset+16], (uint64)(messagepb.ClientRequest)) // 8: type
+		binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], 1)                                // 8: 1 from [InternalRaftRequest, ClientRequest, ConfChange]
+		binary.LittleEndian.PutUint64(tosend[offset+24:offset+32], id)                               // 8: Req Id
+		binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], (uint64)(r.Size()))               // 8: Req size
+		_, err = r.MarshalTo(tosend[offset+40:])                                                     // r.Size(): Req
 		interpreter.PanicIfMarshalError(err)
-		interpreter.NetWrite(s.slConn, tosend)
+		s.slConn.Request(tosend)
+		s.slConn.WaitFor(reqId)
 	}
 	if !r.Serializable {
 		// hack: stale read
@@ -170,23 +169,22 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 			replySize = uint64(len(data))
 		}
 
-		lengths := 8 + 8*3 + 8 + 8 + 8 + replySize
-		tosend := make([]byte, lengths)
-		copy(tosend[:8], []byte("nyusimul"))                                           // nyusimul
-		binary.LittleEndian.PutUint64(tosend[8:16], lengths-16)                        // length
-		binary.LittleEndian.PutUint64(tosend[16:24], 1)                                // send
-		binary.LittleEndian.PutUint64(tosend[24:32], (uint64)(messagepb.ClientResp))   // type
-		binary.LittleEndian.PutUint64(tosend[32:40], id)                               // Reply Id
-		binary.LittleEndian.PutUint64(tosend[40:48], interpreter.ClientRespType(resp)) // Reply Type
+		length := 8*3 + 8 + 8 + replySize
+		reqId, tosend, offset := s.slConn.AllocateRequest(length)
+		binary.LittleEndian.PutUint64(tosend[offset+0:offset+8], 1)                                  // send
+		binary.LittleEndian.PutUint64(tosend[offset+8:offset+16], (uint64)(messagepb.ClientResp))    // type
+		binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], id)                               // Reply Id
+		binary.LittleEndian.PutUint64(tosend[offset+24:offset+32], interpreter.ClientRespType(resp)) // Reply Type
 		if resp == nil {
-			binary.LittleEndian.PutUint64(tosend[48:56], 0) // Reply size
+			binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], 0) // Reply size
 			// Reply is empty
 		} else {
-			binary.LittleEndian.PutUint64(tosend[48:56], replySize) // Reply size
-			copy(tosend[56:], data)
+			binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], replySize) // Reply size
+			copy(tosend[offset+40:], data)
 		}
 		interpreter.PanicIfMarshalError(err)
-		interpreter.NetWrite(s.slConn, tosend)
+		s.slConn.Request(tosend)
+		s.slConn.WaitFor(reqId)
 	}
 	return resp, err
 }
@@ -733,18 +731,17 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 	}
 
 	if s.slConn != nil {
-		lengths := 8 + 8*3 + 8 + 8 + 8 + (uint64)(r.Size())
-		tosend := make([]byte, lengths)
-		copy(tosend[:8], []byte("nyusimul"))                                            // 8: nyusimul
-		binary.LittleEndian.PutUint64(tosend[8:16], lengths-16)                         // 8: length
-		binary.LittleEndian.PutUint64(tosend[16:24], 0)                                 // 8: send
-		binary.LittleEndian.PutUint64(tosend[24:32], (uint64)(messagepb.ClientRequest)) // 8: type
-		binary.LittleEndian.PutUint64(tosend[32:40], 0)                                 // 8: 0 from [InternalRaftRequest, ClientRequest, ConfChange]
-		binary.LittleEndian.PutUint64(tosend[40:48], r.Header.ID)                       // 8: Req Id
-		binary.LittleEndian.PutUint64(tosend[48:56], (uint64)(r.Size()))                // 8: Req size
-		_, err = r.MarshalTo(tosend[56:])                                               // r.Size(): Req
+		length := 8*3 + 8 + 8 + (uint64)(r.Size())
+		reqId, tosend, offset := s.slConn.AllocateRequest(length)
+		binary.LittleEndian.PutUint64(tosend[offset+0:offset+8], 0)                                  // 8: send
+		binary.LittleEndian.PutUint64(tosend[offset+8:offset+16], (uint64)(messagepb.ClientRequest)) // 8: type
+		binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], 0)                                // 8: 0 from [InternalRaftRequest, ClientRequest, ConfChange]
+		binary.LittleEndian.PutUint64(tosend[offset+24:offset+32], r.Header.ID)                      // 8: Req Id
+		binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], (uint64)(r.Size()))               // 8: Req size
+		_, err = r.MarshalTo(tosend[offset+40:])                                                     // r.Size(): Req
 		interpreter.PanicIfMarshalError(err)
-		interpreter.NetWrite(s.slConn, tosend)
+		s.slConn.Request(tosend)
+		s.slConn.WaitFor(reqId)
 	}
 
 	id := r.ID
@@ -783,23 +780,22 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 				replySize = uint64(len(data))
 			}
 
-			lengths := 8 + 8*3 + 8 + 8 + 8 + replySize
-			tosend := make([]byte, lengths)
-			copy(tosend[:8], []byte("nyusimul"))                                           // nyusimul
-			binary.LittleEndian.PutUint64(tosend[8:16], lengths-16)                        // length
-			binary.LittleEndian.PutUint64(tosend[16:24], 1)                                // send
-			binary.LittleEndian.PutUint64(tosend[24:32], (uint64)(messagepb.ClientResp))   // type
-			binary.LittleEndian.PutUint64(tosend[32:40], r.Header.ID)                      // Reply Id
-			binary.LittleEndian.PutUint64(tosend[40:48], interpreter.ClientRespType(resp)) // Reply Type
+			length := 8*3 + 8 + 8 + replySize
+			reqId, tosend, offset := s.slConn.AllocateRequest(length)
+			binary.LittleEndian.PutUint64(tosend[offset+0:offset+8], 1)                                  // send
+			binary.LittleEndian.PutUint64(tosend[offset+8:offset+16], (uint64)(messagepb.ClientResp))    // type
+			binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], r.Header.ID)                      // Reply Id
+			binary.LittleEndian.PutUint64(tosend[offset+24:offset+32], interpreter.ClientRespType(resp)) // Reply Type
 			if resp == nil {
-				binary.LittleEndian.PutUint64(tosend[48:56], 0) // Reply size
+				binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], 0) // Reply size
 				// Reply is empty
 			} else {
-				binary.LittleEndian.PutUint64(tosend[48:56], replySize) // Reply size
-				copy(tosend[56:], data)
+				binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], replySize) // Reply size
+				copy(tosend[offset+40:], data)
 			}
 			interpreter.PanicIfMarshalError(err)
-			interpreter.NetWrite(s.slConn, tosend)
+			s.slConn.Request(tosend)
+			s.slConn.WaitFor(reqId)
 		}
 		return x.(*applyResult), nil
 	case <-cctx.Done():

@@ -201,7 +201,7 @@ type EtcdServer struct {
 	r            raftNode                 // uses 64-bit atomics; keep 64-bit aligned.
 
 	//simulation msg chan
-	slConn net.Conn
+	slConn *interpreter.RPCConnection
 
 	readych chan struct{}
 	Cfg     ServerConfig
@@ -488,25 +488,25 @@ func NewServer(cfg ServerConfig) (srv *EtcdServer, err error) {
 	heartbeat := time.Duration(cfg.TickMs) * time.Millisecond
 
 	useSim := true
-	var usedSlConn net.Conn = nil
+	var usedSlConn *interpreter.RPCConnection = nil
 	if useSim {
-		// slConn, err := net.Dial("tcp", "127.0.0.1:9090")
 		instanceId := os.Getenv("IID")
 		server_sock_path := fmt.Sprintf("/tmp/server.%s.sock", instanceId)
-		slConn, err := net.Dial("unix", server_sock_path)
+		slNetConn, err := net.Dial("unix", server_sock_path)
 		if err != nil {
 			fmt.Printf("\033[1;31mWarning: cannot connect to simulator!\033[0m\n")
+			usedSlConn = new(interpreter.RPCConnection).Init(nil)
 		} else {
-			fmt.Printf("Connected to simulator, %v\n", slConn)
+			fmt.Printf("Connected to simulator, %v\n", slNetConn)
 			marshalled_cluster_info, err := json.Marshal(types.IDToUINT(cl.MemberIDs()))
 			interpreter.PanicIfMarshalError(err)
 			// write my id
-			interpreter.NetWrite(slConn, interpreter.EncodeUint64(uint64(id)))
+			interpreter.NetWrite(slNetConn, interpreter.EncodeUint64(uint64(id)))
 			// write cluster info length
-			interpreter.NetWrite(slConn, interpreter.EncodeUint64(uint64(len(marshalled_cluster_info))))
+			interpreter.NetWrite(slNetConn, interpreter.EncodeUint64(uint64(len(marshalled_cluster_info))))
 			// write cluster info
-			interpreter.NetWrite(slConn, marshalled_cluster_info)
-			usedSlConn = slConn
+			interpreter.NetWrite(slNetConn, marshalled_cluster_info)
+			usedSlConn = new(interpreter.RPCConnection).Init(slNetConn)
 		}
 	}
 
@@ -869,17 +869,16 @@ func (s *EtcdServer) Process(ctx context.Context, m raftpb.Message) error {
 	if m.Type == raftpb.MsgAppResp || m.Type == raftpb.MsgVoteResp || m.Type == raftpb.MsgReadIndexResp {
 		// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.RaftRequest, Msg: messagepb.RaftMsg{Msg: m, Req: nil}})
 		if s.slConn != nil {
-			lengths := 8 + 8*3 + 8 + (uint64)(m.Size()) + 8 + 0
-			tosend := make([]byte, lengths)
-			copy(tosend[:8], []byte("nyusimul"))                                          // nyusimul
-			binary.LittleEndian.PutUint64(tosend[8:16], lengths-16)                       // lengths
-			binary.LittleEndian.PutUint64(tosend[16:24], (uint64)(0))                     // Send = false
-			binary.LittleEndian.PutUint64(tosend[24:32], (uint64)(messagepb.RaftRequest)) // Type
-			binary.LittleEndian.PutUint64(tosend[32:40], (uint64)(m.Size()))              // Msg size
-			_, err := m.MarshalTo(tosend[40:])                                            // Msg
+			length := 8*3 + (uint64)(m.Size()) + 8 + 0
+			reqId, tosend, offset := s.slConn.AllocateRequest(length)
+			binary.LittleEndian.PutUint64(tosend[offset+0:offset+8], (uint64)(0))                      // Send = false
+			binary.LittleEndian.PutUint64(tosend[offset+8:offset+16], (uint64)(messagepb.RaftRequest)) // Type
+			binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], (uint64)(m.Size()))             // Msg size
+			_, err := m.MarshalTo(tosend[offset+24:])                                                  // Msg
 			interpreter.PanicIfMarshalError(err)
-			binary.LittleEndian.PutUint64(tosend[40+m.Size():48+m.Size()], 0) // Req size
-			interpreter.NetWrite(s.slConn, tosend)
+			binary.LittleEndian.PutUint64(tosend[offset+24+m.Size():offset+32+m.Size()], 0) // Req size
+			s.slConn.Request(tosend)
+			s.slConn.WaitFor(reqId)
 		}
 	}
 	return s.r.Step(ctx, m)
@@ -1781,18 +1780,17 @@ func (s *EtcdServer) configure(ctx context.Context, cc raftpb.ConfChange) ([]*me
 	// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.ClientRequest, Msg: messagepb.ClientReq{Req: &cc, ID: cc.ID}})
 
 	if s.slConn != nil {
-		lengths := 8 + 8*3 + 8 + 8 + 8 + (uint64)(cc.Size())
-		tosend := make([]byte, lengths)
-		copy(tosend[:8], []byte("nyusimul"))                                            // 8: nyusimul
-		binary.LittleEndian.PutUint64(tosend[8:16], lengths-16)                         // 8: length
-		binary.LittleEndian.PutUint64(tosend[16:24], 0)                                 // 8: send
-		binary.LittleEndian.PutUint64(tosend[24:32], (uint64)(messagepb.ClientRequest)) // 8: type
-		binary.LittleEndian.PutUint64(tosend[32:40], 2)                                 // 8: 2 from [InternalRaftRequest, ClientRequest, ConfChange]
-		binary.LittleEndian.PutUint64(tosend[40:48], cc.ID)                             // 8: Req Id
-		binary.LittleEndian.PutUint64(tosend[48:56], (uint64)(cc.Size()))               // 8: Req size
-		_, err := cc.MarshalTo(tosend[56:])                                             // r.Size(): Req
+		length := 8*3 + 8 + 8 + (uint64)(cc.Size())
+		reqId, tosend, offset := s.slConn.AllocateRequest(length)
+		binary.LittleEndian.PutUint64(tosend[offset+0:offset+8], 0)                                  // 8: send
+		binary.LittleEndian.PutUint64(tosend[offset+8:offset+16], (uint64)(messagepb.ClientRequest)) // 8: type
+		binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], 2)                                // 8: 2 from [InternalRaftRequest, ClientRequest, ConfChange]
+		binary.LittleEndian.PutUint64(tosend[offset+24:offset+32], cc.ID)                            // 8: Req Id
+		binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], (uint64)(cc.Size()))              // 8: Req size
+		_, err := cc.MarshalTo(tosend[offset+40:])                                                   // r.Size(): Req
 		interpreter.PanicIfMarshalError(err)
-		interpreter.NetWrite(s.slConn, tosend)
+		s.slConn.Request(tosend)
+		s.slConn.WaitFor(reqId)
 	}
 
 	start := time.Now()

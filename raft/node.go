@@ -17,8 +17,8 @@ package raft
 import (
 	"context"
 	"errors"
-	"net"
 
+	"go.etcd.io/etcd/v3/interpreter"
 	pb "go.etcd.io/etcd/v3/raft/raftpb"
 )
 
@@ -206,7 +206,7 @@ type Node interface {
 
 	IsLeader() bool
 
-	SetSlConn(slConn net.Conn)
+	SetSlConn(slConn *interpreter.RPCConnection)
 }
 
 type Peer struct {
@@ -290,7 +290,7 @@ func newNode(rn *RawNode) node {
 	}
 }
 
-func (n *node) SetSlConn(slConn net.Conn) { n.rn.raft.setSlConn(slConn) }
+func (n *node) SetSlConn(slConn *interpreter.RPCConnection) { n.rn.raft.setSlConn(slConn) }
 
 func (n *node) Stop() {
 	select {
