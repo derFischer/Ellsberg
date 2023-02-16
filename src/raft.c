@@ -880,7 +880,7 @@ static int raftSendAppendEntries(raft_server_t *raft, void *user_data,
         raft_index_t last_idx = msg->prev_log_idx;
         raft_entry_t *ety = raft_get_entry_from_idx(raft, last_idx);
 
-        if (raft_get_forwarder(raft) && (match_idx < last_idx) && ety->type == RAFT_LOGTYPE_ADD_NONVOTING_NODE) {
+        if (raft_get_forwarder(raft) && (!((match_idx < last_idx) && ety->type == RAFT_LOGTYPE_ADD_NONVOTING_NODE))) {
             // Sending(send append entries)
             sds joined_req_ids;
             if (msg->n_entries > 0) {
