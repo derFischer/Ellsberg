@@ -128,8 +128,8 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 		binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], (uint64)(r.Size()))               // 8: Req size
 		_, err = r.MarshalTo(tosend[offset+40:])                                                     // r.Size(): Req
 		interpreter.PanicIfMarshalError(err)
-		s.slConn.Request(tosend)
-		s.slConn.WaitFor(reqId)
+		ch := s.slConn.Request(tosend)
+		s.slConn.WaitFor(reqId, ch)
 	}
 	if !r.Serializable {
 		// hack: stale read
@@ -183,8 +183,8 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 			copy(tosend[offset+40:], data)
 		}
 		interpreter.PanicIfMarshalError(err)
-		s.slConn.Request(tosend)
-		s.slConn.WaitFor(reqId)
+		ch := s.slConn.Request(tosend)
+		s.slConn.WaitFor(reqId, ch)
 	}
 	return resp, err
 }
@@ -740,8 +740,8 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 		binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], (uint64)(r.Size()))               // 8: Req size
 		_, err = r.MarshalTo(tosend[offset+40:])                                                     // r.Size(): Req
 		interpreter.PanicIfMarshalError(err)
-		s.slConn.Request(tosend)
-		s.slConn.WaitFor(reqId)
+		ch := s.slConn.Request(tosend)
+		s.slConn.WaitFor(reqId, ch)
 	}
 
 	id := r.ID
@@ -794,8 +794,8 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 				copy(tosend[offset+40:], data)
 			}
 			interpreter.PanicIfMarshalError(err)
-			s.slConn.Request(tosend)
-			s.slConn.WaitFor(reqId)
+			ch := s.slConn.Request(tosend)
+			s.slConn.WaitFor(reqId, ch)
 		}
 		return x.(*applyResult), nil
 	case <-cctx.Done():

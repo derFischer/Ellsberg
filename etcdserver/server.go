@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"net"
 	"net/http"
 	"os"
 	"path"
@@ -37,6 +36,7 @@ import (
 	"go.uber.org/zap"
 
 	"go.etcd.io/etcd/v3/auth"
+	"go.etcd.io/etcd/v3/comm"
 	"go.etcd.io/etcd/v3/etcdserver/api"
 	"go.etcd.io/etcd/v3/etcdserver/api/membership"
 	"go.etcd.io/etcd/v3/etcdserver/api/membership/membershippb"
@@ -201,7 +201,7 @@ type EtcdServer struct {
 	r            raftNode                 // uses 64-bit atomics; keep 64-bit aligned.
 
 	//simulation msg chan
-	slConn *interpreter.RPCConnection
+	slConn *comm.RPCConnection
 
 	readych chan struct{}
 	Cfg     ServerConfig
@@ -486,29 +486,7 @@ func NewServer(cfg ServerConfig) (srv *EtcdServer, err error) {
 	lstats := stats.NewLeaderStats(cfg.Logger, id.String())
 
 	heartbeat := time.Duration(cfg.TickMs) * time.Millisecond
-
-	useSim := true
-	var usedSlConn *interpreter.RPCConnection = nil
-	if useSim {
-		instanceId := os.Getenv("IID")
-		server_sock_path := fmt.Sprintf("/tmp/server.%s.sock", instanceId)
-		slNetConn, err := net.Dial("unix", server_sock_path)
-		if err != nil {
-			fmt.Printf("\033[1;31mWarning: cannot connect to simulator!\033[0m\n")
-			usedSlConn = new(interpreter.RPCConnection).Init(nil)
-		} else {
-			fmt.Printf("Connected to simulator, %v\n", slNetConn)
-			marshalled_cluster_info, err := json.Marshal(types.IDToUINT(cl.MemberIDs()))
-			interpreter.PanicIfMarshalError(err)
-			// write my id
-			interpreter.NetWrite(slNetConn, interpreter.EncodeUint64(uint64(id)))
-			// write cluster info length
-			interpreter.NetWrite(slNetConn, interpreter.EncodeUint64(uint64(len(marshalled_cluster_info))))
-			// write cluster info
-			interpreter.NetWrite(slNetConn, marshalled_cluster_info)
-			usedSlConn = new(interpreter.RPCConnection).Init(slNetConn)
-		}
-	}
+	usedSlConn := new(comm.RPCConnection).Init(uint64(id), types.IDToUINT(cl.MemberIDs()))
 
 	n.SetSlConn(usedSlConn)
 
@@ -877,8 +855,8 @@ func (s *EtcdServer) Process(ctx context.Context, m raftpb.Message) error {
 			_, err := m.MarshalTo(tosend[offset+24:])                                                  // Msg
 			interpreter.PanicIfMarshalError(err)
 			binary.LittleEndian.PutUint64(tosend[offset+24+m.Size():offset+32+m.Size()], 0) // Req size
-			s.slConn.Request(tosend)
-			s.slConn.WaitFor(reqId)
+			ch := s.slConn.Request(tosend)
+			s.slConn.WaitFor(reqId, ch)
 		}
 	}
 	return s.r.Step(ctx, m)
@@ -1789,8 +1767,8 @@ func (s *EtcdServer) configure(ctx context.Context, cc raftpb.ConfChange) ([]*me
 		binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], (uint64)(cc.Size()))              // 8: Req size
 		_, err := cc.MarshalTo(tosend[offset+40:])                                                   // r.Size(): Req
 		interpreter.PanicIfMarshalError(err)
-		s.slConn.Request(tosend)
-		s.slConn.WaitFor(reqId)
+		ch := s.slConn.Request(tosend)
+		s.slConn.WaitFor(reqId, ch)
 	}
 
 	start := time.Now()

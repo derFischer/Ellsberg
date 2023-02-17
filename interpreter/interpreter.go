@@ -3,7 +3,6 @@ package interpreter
 import (
 	"encoding/binary"
 	"fmt"
-	"net"
 
 	"github.com/gogo/protobuf/proto"
 	pb "go.etcd.io/etcd/v3/etcdserver/etcdserverpb"
@@ -61,21 +60,6 @@ func EncodeUint64(n uint64) []byte {
 	b := make([]byte, 8)
 	binary.LittleEndian.PutUint64(b, n)
 	return b
-}
-
-func NetWrite(conn net.Conn, bytes []byte) {
-	_, err := conn.Write(bytes)
-	if err != nil {
-		panic(fmt.Sprintf("Write to conn failed, err:%v\n", err))
-	}
-}
-
-func NetRead(conn net.Conn, bytes []byte) (int, []byte) {
-	n, err := conn.Read(bytes)
-	if err != nil {
-		panic(fmt.Sprintf("Read from conn failed, err:%v\n", err))
-	}
-	return n, bytes
 }
 
 func PanicIfMarshalError(err error) {

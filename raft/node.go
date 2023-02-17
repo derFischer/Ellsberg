@@ -18,7 +18,7 @@ import (
 	"context"
 	"errors"
 
-	"go.etcd.io/etcd/v3/interpreter"
+	"go.etcd.io/etcd/v3/comm"
 	pb "go.etcd.io/etcd/v3/raft/raftpb"
 )
 
@@ -206,7 +206,7 @@ type Node interface {
 
 	IsLeader() bool
 
-	SetSlConn(slConn *interpreter.RPCConnection)
+	SetSlConn(slConn *comm.RPCConnection)
 }
 
 type Peer struct {
@@ -290,7 +290,7 @@ func newNode(rn *RawNode) node {
 	}
 }
 
-func (n *node) SetSlConn(slConn *interpreter.RPCConnection) { n.rn.raft.setSlConn(slConn) }
+func (n *node) SetSlConn(slConn *comm.RPCConnection) { n.rn.raft.setSlConn(slConn) }
 
 func (n *node) Stop() {
 	select {

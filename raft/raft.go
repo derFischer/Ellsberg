@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"go.etcd.io/etcd/v3/comm"
 	"go.etcd.io/etcd/v3/interpreter"
 	"go.etcd.io/etcd/v3/messagepb"
 	"go.etcd.io/etcd/v3/raft/confchange"
@@ -323,7 +324,7 @@ type raft struct {
 	logger Logger
 
 	//simulation
-	slConn *interpreter.RPCConnection
+	slConn *comm.RPCConnection
 }
 
 func newRaft(c *Config) *raft {
@@ -391,7 +392,7 @@ func newRaft(c *Config) *raft {
 	return r
 }
 
-func (r *raft) setSlConn(slConn *interpreter.RPCConnection) { r.slConn = slConn }
+func (r *raft) setSlConn(slConn *comm.RPCConnection) { r.slConn = slConn }
 
 func (r *raft) IsLeader() bool { return r.state == StateLeader }
 
@@ -456,8 +457,8 @@ func (r *raft) send(args interface{}, m pb.Message) {
 				_, err := m.MarshalTo(tosend[offset+24:])                                                  // Msg
 				interpreter.PanicIfMarshalError(err)
 				binary.LittleEndian.PutUint64(tosend[offset+24+m.Size():offset+32+m.Size()], 0) // Req size
-				r.slConn.Request(tosend)
-				r.slConn.WaitFor(reqId)
+				ch := r.slConn.Request(tosend)
+				r.slConn.WaitFor(reqId, ch)
 			}
 		}
 	} else {
@@ -475,8 +476,8 @@ func (r *raft) send(args interface{}, m pb.Message) {
 				binary.LittleEndian.PutUint64(tosend[offset+24+m.Size():offset+32+m.Size()], (uint64)(req.Size())) // Req size
 				_, err = req.MarshalTo(tosend[offset+32+m.Size():])                                                // Resp
 				interpreter.PanicIfMarshalError(err)
-				r.slConn.Request(tosend)
-				r.slConn.WaitFor(reqId)
+				ch := r.slConn.Request(tosend)
+				r.slConn.WaitFor(reqId, ch)
 			}
 		}
 	}

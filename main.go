@@ -19,10 +19,11 @@
 //
 // This package should NOT be extended or modified in any way; to modify the
 // etcd binary, work in the `go.etcd.io/etcd/etcdmain` package.
-//
 package main
 
-import "go.etcd.io/etcd/v3/etcdmain"
+import (
+	"go.etcd.io/etcd/v3/etcdmain"
+)
 
 func main() {
 	etcdmain.Main()
