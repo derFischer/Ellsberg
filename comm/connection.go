@@ -8,6 +8,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // MODE = [async|sync]
@@ -17,6 +18,7 @@ const (
 	NONE  MODE_T = 0 // means don't forward to simulator
 	ASYNC MODE_T = 1
 	SYNC  MODE_T = 2
+	FILE  MODE_T = 3
 )
 
 // CONNTYPE = [tcp|unix|pipe]
@@ -39,6 +41,10 @@ type RPCConnection struct {
 	doneIds *sync.Map
 	OutConn ReaderWriter // [net.Conn|*os.File]
 	InConn  ReaderWriter // [net.Conn|*os.File]
+
+	// For FILE mode
+	bufferedData [][]byte
+	file         *os.File
 }
 
 func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
@@ -51,6 +57,8 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 			MODE = SYNC
 		case "ASYNC":
 			MODE = ASYNC
+		case "FILE":
+			MODE = FILE
 		default:
 			panic(fmt.Sprintf("Unknown SIMMODE: %v", mode))
 		}
@@ -76,39 +84,49 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 	c = new(RPCConnection)
 
 	iid := os.Getenv("IID")
-	switch CONNTYPE {
-	case UNIX:
-		server_sock_path := fmt.Sprintf("/tmp/server.%s.sock", iid)
-		c.OutConn, err = net.Dial("unix", server_sock_path)
-		c.InConn = c.OutConn
-	case TCP:
-		c.OutConn, err = net.Dial("tcp", "127.0.0.1:9090")
-		c.InConn = c.OutConn
-	case PIPE:
-		stocPath := fmt.Sprintf("/tmp/tmpPipe_s_to_c.%s.pipe", iid)
-		ctosPath := fmt.Sprintf("/tmp/tmpPipe_c_to_s.%s.pipe", iid)
-		c.OutConn, err = os.OpenFile(ctosPath, os.O_RDWR, os.ModeNamedPipe)
+
+	if MODE == FILE {
+		c.bufferedData = make([][]byte, 0)
+		c.file, err = os.OpenFile(fmt.Sprintf("/tmp/messages.%s.data", iid), os.O_RDWR|os.O_CREATE, 0644)
 		if err != nil {
-			break
+			panic(fmt.Sprintf("Cannot open file: %v", err))
 		}
-		c.InConn, err = os.OpenFile(stocPath, os.O_RDONLY, os.ModeNamedPipe)
-	default:
-		panic("Unknown CONNTYPE")
-	}
-	if err != nil {
-		fmt.Printf("\033[1;31mWarning: cannot connect to simulator! (%v)\033[0m\n", err)
-		return nil
 	}
 
-	fmt.Printf("Connected to simulator, out=%v, in=%v\n", c.OutConn, c.InConn)
-	marshalled_cluster_info, err := json.Marshal(ids)
-	PanicIfMarshalError(err)
-	// write my id
-	NetWrite(c.OutConn, EncodeUint64(myId))
-	// write cluster info length
-	NetWrite(c.OutConn, EncodeUint64(uint64(len(marshalled_cluster_info))))
-	// write cluster info
-	NetWrite(c.OutConn, marshalled_cluster_info)
+	if MODE != FILE {
+		switch CONNTYPE {
+		case UNIX:
+			server_sock_path := fmt.Sprintf("/tmp/server.%s.sock", iid)
+			c.OutConn, err = net.Dial("unix", server_sock_path)
+			c.InConn = c.OutConn
+		case TCP:
+			c.OutConn, err = net.Dial("tcp", "127.0.0.1:9090")
+			c.InConn = c.OutConn
+		case PIPE:
+			stocPath := fmt.Sprintf("/tmp/tmpPipe_s_to_c.%s.pipe", iid)
+			ctosPath := fmt.Sprintf("/tmp/tmpPipe_c_to_s.%s.pipe", iid)
+			c.OutConn, err = os.OpenFile(ctosPath, os.O_RDWR, os.ModeNamedPipe)
+			if err != nil {
+				break
+			}
+			c.InConn, err = os.OpenFile(stocPath, os.O_RDONLY, os.ModeNamedPipe)
+		default:
+			panic("Unknown CONNTYPE")
+		}
+		if err != nil {
+			fmt.Printf("\033[1;31mWarning: cannot connect to simulator! (%v)\033[0m\n", err)
+			return nil
+		}
+		fmt.Printf("Connected to simulator, out=%v, in=%v\n", c.OutConn, c.InConn)
+		marshalled_cluster_info, err := json.Marshal(ids)
+		PanicIfMarshalError(err)
+		// write my id
+		NetWrite(c.OutConn, EncodeUint64(myId))
+		// write cluster info length
+		NetWrite(c.OutConn, EncodeUint64(uint64(len(marshalled_cluster_info))))
+		// write cluster info
+		NetWrite(c.OutConn, marshalled_cluster_info)
+	}
 
 	if MODE == SYNC {
 		c.mutex = &sync.RWMutex{}
@@ -140,6 +158,13 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 				ch.(chan bool) <- true
 			}
 		}()
+	} else if MODE == FILE {
+		go func() {
+			for {
+				time.Sleep(10 * time.Second)
+				c.file.Sync()
+			}
+		}()
 	}
 
 	return c
@@ -167,15 +192,22 @@ func (c *RPCConnection) ExtractReqId(reqbytes []byte) uint64 {
 func (c *RPCConnection) Request(reqbytes []byte) chan bool {
 	var ch chan bool = nil
 
-	if MODE == SYNC {
-		reqId := c.ExtractReqId(reqbytes)
-		ch = make(chan bool)
-		c.doneIds.Store(reqId, ch)
-	}
+	if MODE != FILE {
+		if MODE == SYNC {
+			reqId := c.ExtractReqId(reqbytes)
+			ch = make(chan bool)
+			c.doneIds.Store(reqId, ch)
+		}
 
-	_, err := c.OutConn.Write(reqbytes)
-	if err != nil {
-		panic(fmt.Sprintf("Write to conn failed, err:%v\n", err))
+		_, err := c.OutConn.Write(reqbytes)
+		if err != nil {
+			panic(fmt.Sprintf("Write to conn failed, err:%v\n", err))
+		}
+	} else {
+		_, err := c.file.Write(reqbytes)
+		if err != nil {
+			panic(fmt.Sprintf("Write to file failed, err:%v\n", err))
+		}
 	}
 	return ch
 }
