@@ -950,7 +950,7 @@ func (r *raft) Step(m pb.Message) error {
 			// with "pb.MsgAppResp" of higher term would force leader to step down.
 			// However, this disruption is inevitable to free this stuck node with
 			// fresh election. This can be prevented with Pre-Vote phase.
-			r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp})
+			r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Reject: true})
 		} else if m.Type == pb.MsgPreVote {
 			// Before Pre-Vote enable, there may have candidate with higher term,
 			// but less log. After update to Pre-Vote, the cluster may deadlock if
