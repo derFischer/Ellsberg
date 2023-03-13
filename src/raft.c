@@ -1117,7 +1117,12 @@ static int raftNodeHasSufficientLogs(raft_server_t *raft, void *user_data, raft_
 
     raft_entry_req_t *entry = raft_entry_new(sizeof(RaftCfgChange));
     entry->id = rand();
-    entry->req_id = raft_node_next_reqid(raft_node);
+    raft_add_node_req_t* tmp_req = raft_get_add_node_req_id(raft, node->id);
+    raft_index_t req_id = 0;
+    if (tmp_req != NULL) {
+        req_id = tmp_req->req_id;
+    }
+    entry->req_id = req_id;
     entry->type = RAFT_LOGTYPE_ADD_NODE;
 
     RaftCfgChange *cfgchange = (RaftCfgChange *) entry->data;

@@ -31,6 +31,8 @@ void raft_add_node_req(raft_server_t *me, raft_node_id_t id, raft_req_id_t reqid
         return;
     }
     req = malloc(sizeof(raft_add_node_req_t));
+    req->node_id = id;
+    req->req_id = reqid;
     if (me->num_added_nodes == me->req_array_size) {
         raft_add_node_req_t **new_array = malloc(sizeof(raft_add_node_req_t*) * me->req_array_size * 2);
         memset(new_array, 0, sizeof(raft_add_node_req_t*) * me->req_array_size * 2);

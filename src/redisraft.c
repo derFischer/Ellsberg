@@ -144,7 +144,7 @@ static int cmdRaftNode(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
 
         raft_entry_req_t *entry = raft_entry_new(sizeof(cfg));
         entry->id = rand();
-        entry->req_id = raft_node_next_reqid(raft_get_my_node(rr->raft));
+        raft_req_id_t req_id = raft_node_next_reqid(raft_get_my_node(rr->raft));
         entry->type = RAFT_LOGTYPE_ADD_NONVOTING_NODE;
         memcpy(entry->data, &cfg, sizeof(cfg));
         entryAttachRaftReq(rr, entry, req);
@@ -162,12 +162,12 @@ static int cmdRaftNode(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
         if (raft_get_forwarder(rr->raft)) {
             printf("recv node add (nonvoting), commit=%ld\n", raft_get_commit_idx(rr->raft));
             // Sending(recv node add (nonvoting))
-            sds cmd = InterpreteRaftNode(rr->raft, false, /*add=*/true, /*req_id=*/entry->req_id, argv, NULL, argc);
+            sds cmd = InterpreteRaftNode(rr->raft, false, /*add=*/true, /*req_id=*/req_id, argv, NULL, argc);
             size_t cmd_len = sdslen(cmd);
             raft_forward(rr->raft, &cmd_len, sizeof(size_t));
             raft_forward(rr->raft, cmd, cmd_len);
             sdsfree(cmd);
-            raft_add_node_req(rr->raft, node_id, entry->req_id);
+            raft_add_node_req(rr->raft, node_id, req_id);
         }
 
         raft_entry_release(entry);
