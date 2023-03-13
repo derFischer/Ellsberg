@@ -199,14 +199,20 @@ func (c *RPCConnection) Request(reqbytes []byte) chan bool {
 			c.doneIds.Store(reqId, ch)
 		}
 
-		_, err := c.OutConn.Write(reqbytes)
+		n, err := c.OutConn.Write(reqbytes)
 		if err != nil {
 			panic(fmt.Sprintf("Write to conn failed, err:%v\n", err))
 		}
+		if n != len(reqbytes) {
+			panic(fmt.Sprintf("Write to conn failed, n:%v, len(reqbytes):%v\n", n, len(reqbytes)))
+		}
 	} else {
-		_, err := c.file.Write(reqbytes)
+		n, err := c.file.Write(reqbytes)
 		if err != nil {
 			panic(fmt.Sprintf("Write to file failed, err:%v\n", err))
+		}
+		if n != len(reqbytes) {
+			panic(fmt.Sprintf("Write to conn failed, n:%v, len(reqbytes):%v\n", n, len(reqbytes)))
 		}
 	}
 	return ch
