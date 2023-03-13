@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,6 +46,7 @@ type RPCConnection struct {
 	// For FILE mode
 	bufferedData [][]byte
 	file         *os.File
+	logDir       string
 }
 
 func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
@@ -86,8 +88,16 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 	iid := os.Getenv("IID")
 
 	if MODE == FILE {
+		c.mutex = &sync.RWMutex{}
 		c.bufferedData = make([][]byte, 0)
-		c.file, err = os.OpenFile(fmt.Sprintf("/tmp/messages.%s.data", iid), os.O_RDWR|os.O_CREATE, 0644)
+		now := time.Now()
+		formatTime := fmt.Sprintf("%04d%02d%02d-%02d%02d%02d", now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second())
+		c.logDir = "/mydata/log" + formatTime
+		err = os.MkdirAll(c.logDir, 0755)
+		if err != nil {
+			panic(fmt.Sprintf("Cannot create log directory: %v", err))
+		}
+		c.file, err = os.OpenFile(filepath.Join(c.logDir, fmt.Sprintf("messages.%s.%s.data", iid, formatTime)), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 		if err != nil {
 			panic(fmt.Sprintf("Cannot open file: %v", err))
 		}
@@ -161,8 +171,15 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 	} else if MODE == FILE {
 		go func() {
 			for {
-				time.Sleep(10 * time.Second)
+				// new file every 1 minutes
+				time.Sleep(60 * time.Second)
+				c.mutex.Lock()
 				c.file.Sync()
+				c.file.Close()
+				now := time.Now()
+				formatTime := fmt.Sprintf("%04d%02d%02d-%02d%02d%02d", now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second())
+				c.file, err = os.OpenFile(filepath.Join(c.logDir, fmt.Sprintf("messages.%s.%s.data", iid, formatTime)), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+				c.mutex.Unlock()
 			}
 		}()
 	}
@@ -207,6 +224,7 @@ func (c *RPCConnection) Request(reqbytes []byte) chan bool {
 			panic(fmt.Sprintf("Write to conn failed, n:%v, len(reqbytes):%v\n", n, len(reqbytes)))
 		}
 	} else {
+		c.mutex.Lock()
 		n, err := c.file.Write(reqbytes)
 		if err != nil {
 			panic(fmt.Sprintf("Write to file failed, err:%v\n", err))
@@ -214,6 +232,7 @@ func (c *RPCConnection) Request(reqbytes []byte) chan bool {
 		if n != len(reqbytes) {
 			panic(fmt.Sprintf("Write to conn failed, n:%v, len(reqbytes):%v\n", n, len(reqbytes)))
 		}
+		c.mutex.Unlock()
 	}
 	return ch
 }
