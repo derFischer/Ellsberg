@@ -701,6 +701,9 @@ func (s *EtcdServer) doSerialize(ctx context.Context, chk func(*auth.AuthInfo) e
 }
 
 func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.InternalRaftRequest) (*applyResult, error) {
+	if !s.r.IsLeader() {
+		return nil, ErrNotLeader
+	}
 	ai := s.getAppliedIndex()
 	ci := s.getCommittedIndex()
 	if ci > ai+maxGapBetweenApplyAndCommitIndex {
@@ -730,18 +733,21 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 		return nil, ErrRequestTooLarge
 	}
 
-	if s.slConn != nil {
-		length := 8*3 + 8 + 8 + (uint64)(r.Size())
-		reqId, tosend, offset := s.slConn.AllocateRequest(length)
-		binary.LittleEndian.PutUint64(tosend[offset+0:offset+8], 0)                                  // 8: send
-		binary.LittleEndian.PutUint64(tosend[offset+8:offset+16], (uint64)(messagepb.ClientRequest)) // 8: type
-		binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], 0)                                // 8: 0 from [InternalRaftRequest, ClientRequest, ConfChange]
-		binary.LittleEndian.PutUint64(tosend[offset+24:offset+32], r.Header.ID)                      // 8: Req Id
-		binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], (uint64)(r.Size()))               // 8: Req size
-		_, err = r.MarshalTo(tosend[offset+40:])                                                     // r.Size(): Req
-		interpreter.PanicIfMarshalError(err)
-		ch := s.slConn.Request(tosend)
-		s.slConn.WaitFor(reqId, ch)
+	//double check the state before send to simulator
+	if s.r.IsLeader() {
+		if s.slConn != nil {
+			length := 8*3 + 8 + 8 + (uint64)(r.Size())
+			reqId, tosend, offset := s.slConn.AllocateRequest(length)
+			binary.LittleEndian.PutUint64(tosend[offset+0:offset+8], 0)                                  // 8: send
+			binary.LittleEndian.PutUint64(tosend[offset+8:offset+16], (uint64)(messagepb.ClientRequest)) // 8: type
+			binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], 0)                                // 8: 0 from [InternalRaftRequest, ClientRequest, ConfChange]
+			binary.LittleEndian.PutUint64(tosend[offset+24:offset+32], r.Header.ID)                      // 8: Req Id
+			binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], (uint64)(r.Size()))               // 8: Req size
+			_, err = r.MarshalTo(tosend[offset+40:])                                                     // r.Size(): Req
+			interpreter.PanicIfMarshalError(err)
+			ch := s.slConn.Request(tosend)
+			s.slConn.WaitFor(reqId, ch)
+		}
 	}
 
 	id := r.ID

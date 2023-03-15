@@ -504,7 +504,8 @@ func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 	m.To = to
 
 	term, errt := r.raftLog.term(pr.Next - 1)
-	ents, erre := r.raftLog.entries(pr.Next, r.maxMsgSize)
+	// ents, erre := r.raftLog.entries(pr.Next, r.maxMsgSize)
+	ents, erre := r.raftLog.entries(pr.Next, math.MaxUint64)
 	if len(ents) == 0 && !sendIfEmpty {
 		return false
 	}
@@ -1410,8 +1411,12 @@ func stepFollower(r *raft, m pb.Message) error {
 			r.logger.Infof("%x not forwarding to leader %x at term %d; dropping proposal", r.id, r.lead, r.Term)
 			return ErrProposalDropped
 		}
-		m.To = r.lead
-		r.send(nil, m)
+		if r.raftLog.lastIndex() < 9 {
+			m.To = r.lead
+			r.send(nil, m)
+		} else {
+			return ErrProposalDropped
+		}
 	case pb.MsgApp:
 		r.electionElapsed = 0
 		r.lead = m.From
@@ -1459,9 +1464,22 @@ func stepFollower(r *raft, m pb.Message) error {
 }
 
 func (r *raft) handleAppendEntries(m pb.Message) {
+	// if m.Index < r.raftLog.committed {
+	// 	r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.committed, Context: m.Context})
+	// 	return
+	// }
+	//change: if m last index is smaller than local commit index, but it contains longer entries, we will still append it:
 	if m.Index < r.raftLog.committed {
-		r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.committed, Context: m.Context})
-		return
+		last_entry := m.Entries[len(m.Entries)-1]
+		if last_entry.Index == r.raftLog.committed {
+			r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.committed, Context: m.Context})
+			return
+		} else {
+			commit_entry := m.Entries[r.raftLog.committed-m.Index-1]
+			if mlastIndex, ok := r.raftLog.maybeAppend(r.raftLog.committed, commit_entry.Term, m.Commit, m.Entries[r.raftLog.committed-m.Index:]...); ok {
+				r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Index: mlastIndex, Context: m.Context})
+			}
+		}
 	}
 
 	if mlastIndex, ok := r.raftLog.maybeAppend(m.Index, m.LogTerm, m.Commit, m.Entries...); ok {
