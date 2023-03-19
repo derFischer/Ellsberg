@@ -103,6 +103,10 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 	var resp *pb.RangeResponse
 	var err error
 
+	if !s.r.IsLeader() {
+		return nil, ErrNotLeader
+	}
+
 	defer func(start time.Time) {
 		warnOfExpensiveReadOnlyRangeRequest(s.getLogger(), start, r, resp, err)
 		if resp != nil {
