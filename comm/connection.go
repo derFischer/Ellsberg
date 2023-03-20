@@ -193,12 +193,14 @@ func (c *RPCConnection) NextReqId() uint64 {
 }
 
 func (c *RPCConnection) AllocateRequest(length uint64) (uint64, []byte, int) {
-	reqbytes := make([]byte, 24+length)
+	offset := 32
+	reqbytes := make([]byte, offset+int(length))
 	copy(reqbytes[:8], []byte("nyusimul"))
 	reqId := c.NextReqId()
 	binary.LittleEndian.PutUint64(reqbytes[8:16], reqId)
 	binary.LittleEndian.PutUint64(reqbytes[16:24], length)
-	offset := 24
+	nowNano := time.Now().UnixNano()
+	binary.LittleEndian.PutUint64(reqbytes[24:32], uint64(nowNano))
 	return reqId, reqbytes, offset
 }
 
