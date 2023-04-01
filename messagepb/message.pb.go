@@ -3,10 +3,11 @@ package messagepb
 type MsgType int8
 
 const (
-	ClientRequest MsgType = 1
-	ClientResp    MsgType = 2
-	RaftRequest   MsgType = 3
-	RaftResp      MsgType = 4
+	ClientRequest  MsgType = 1
+	ClientRespSucc MsgType = 2
+	ClientRespFail MsgType = 3
+	RaftRequest    MsgType = 4
+	RaftResp       MsgType = 5
 )
 
 type Ctx interface{}

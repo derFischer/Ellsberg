@@ -147,6 +147,35 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 		err = s.linearizableReadNotify(ctx)
 		trace.Step("agreement among raft nodes before linearized reading")
 		if err != nil {
+			if s.slConn != nil {
+				var data []byte
+				replySize := uint64(0)
+				if resp == nil {
+					replySize = 0
+					data = make([]byte, 0)
+				} else {
+					data, err = proto.Marshal(resp)
+					interpreter.PanicIfMarshalError(err)
+					replySize = uint64(len(data))
+				}
+
+				length := 8*3 + 8 + 8 + replySize
+				reqId, tosend, offset := s.slConn.AllocateRequest(length)
+				binary.LittleEndian.PutUint64(tosend[offset+0:offset+8], 1)                                   // send
+				binary.LittleEndian.PutUint64(tosend[offset+8:offset+16], (uint64)(messagepb.ClientRespSucc)) // type
+				binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], id)                                // Reply Id
+				binary.LittleEndian.PutUint64(tosend[offset+24:offset+32], interpreter.ClientRespType(resp))  // Reply Type
+				if resp == nil {
+					binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], 0) // Reply size
+					// Reply is empty
+				} else {
+					binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], replySize) // Reply size
+					copy(tosend[offset+40:], data)
+				}
+				// interpreter.PanicIfMarshalError(err)
+				ch := s.slConn.Request(tosend)
+				s.slConn.WaitFor(reqId, ch)
+			}
 			return nil, err
 		}
 	}
@@ -175,10 +204,10 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 
 		length := 8*3 + 8 + 8 + replySize
 		reqId, tosend, offset := s.slConn.AllocateRequest(length)
-		binary.LittleEndian.PutUint64(tosend[offset+0:offset+8], 1)                                  // send
-		binary.LittleEndian.PutUint64(tosend[offset+8:offset+16], (uint64)(messagepb.ClientResp))    // type
-		binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], id)                               // Reply Id
-		binary.LittleEndian.PutUint64(tosend[offset+24:offset+32], interpreter.ClientRespType(resp)) // Reply Type
+		binary.LittleEndian.PutUint64(tosend[offset+0:offset+8], 1)                                   // send
+		binary.LittleEndian.PutUint64(tosend[offset+8:offset+16], (uint64)(messagepb.ClientRespSucc)) // type
+		binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], id)                                // Reply Id
+		binary.LittleEndian.PutUint64(tosend[offset+24:offset+32], interpreter.ClientRespType(resp))  // Reply Type
 		if resp == nil {
 			binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], 0) // Reply size
 			// Reply is empty
@@ -705,9 +734,6 @@ func (s *EtcdServer) doSerialize(ctx context.Context, chk func(*auth.AuthInfo) e
 }
 
 func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.InternalRaftRequest) (*applyResult, error) {
-	if !s.r.IsLeader() {
-		return nil, ErrNotLeader
-	}
 	ai := s.getAppliedIndex()
 	ci := s.getCommittedIndex()
 	if ci > ai+maxGapBetweenApplyAndCommitIndex {
@@ -737,23 +763,6 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 		return nil, ErrRequestTooLarge
 	}
 
-	//double check the state before send to simulator
-	if s.r.IsLeader() {
-		if s.slConn != nil {
-			length := 8*3 + 8 + 8 + (uint64)(r.Size())
-			reqId, tosend, offset := s.slConn.AllocateRequest(length)
-			binary.LittleEndian.PutUint64(tosend[offset+0:offset+8], 0)                                  // 8: send
-			binary.LittleEndian.PutUint64(tosend[offset+8:offset+16], (uint64)(messagepb.ClientRequest)) // 8: type
-			binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], 0)                                // 8: 0 from [InternalRaftRequest, ClientRequest, ConfChange]
-			binary.LittleEndian.PutUint64(tosend[offset+24:offset+32], r.Header.ID)                      // 8: Req Id
-			binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], (uint64)(r.Size()))               // 8: Req size
-			_, err = r.MarshalTo(tosend[offset+40:])                                                     // r.Size(): Req
-			interpreter.PanicIfMarshalError(err)
-			ch := s.slConn.Request(tosend)
-			s.slConn.WaitFor(reqId, ch)
-		}
-	}
-
 	id := r.ID
 	if id == 0 {
 		id = r.Header.ID
@@ -765,10 +774,42 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 
 	start := time.Now()
 	// log.Printf("!!!!!!!!!!!!!!!!!!!put request before propose: %+v\n", r.Put)
+	if !s.r.IsLeader() {
+		return nil, ErrNotLeader
+	}
+	if s.slConn != nil {
+		length := 8*3 + 8 + 8 + (uint64)(r.Size())
+		reqId, tosend, offset := s.slConn.AllocateRequest(length)
+		binary.LittleEndian.PutUint64(tosend[offset+0:offset+8], 0)                                  // 8: send
+		binary.LittleEndian.PutUint64(tosend[offset+8:offset+16], (uint64)(messagepb.ClientRequest)) // 8: type
+		binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], 0)                                // 8: 0 from [InternalRaftRequest, ClientRequest, ConfChange]
+		binary.LittleEndian.PutUint64(tosend[offset+24:offset+32], r.Header.ID)                      // 8: Req Id
+		binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], (uint64)(r.Size()))               // 8: Req size
+		_, err = r.MarshalTo(tosend[offset+40:])                                                     // r.Size(): Req
+		interpreter.PanicIfMarshalError(err)
+		ch := s.slConn.Request(tosend)
+		s.slConn.WaitFor(reqId, ch)
+	}
 	err = s.r.Propose(cctx, data)
 	if err != nil {
 		proposalsFailed.Inc()
 		s.w.Trigger(id, nil) // GC wait
+		if s.slConn != nil {
+			replySize := uint64(0)
+			replySize = 0
+			data = make([]byte, 0)
+
+			length := 8*3 + 8 + 8 + replySize
+			reqId, tosend, offset := s.slConn.AllocateRequest(length)
+			binary.LittleEndian.PutUint64(tosend[offset+0:offset+8], 1)                                   // send
+			binary.LittleEndian.PutUint64(tosend[offset+8:offset+16], (uint64)(messagepb.ClientRespFail)) // type
+			binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], r.Header.ID)                       // Reply Id
+			binary.LittleEndian.PutUint64(tosend[offset+24:offset+32], 0)                                 // Reply Type
+			binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], 0)                                 // Reply size
+			// interpreter.PanicIfMarshalError(err)
+			ch := s.slConn.Request(tosend)
+			s.slConn.WaitFor(reqId, ch)
+		}
 		return nil, err
 	}
 	proposalsPending.Inc()
@@ -778,34 +819,52 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 	case x := <-ch:
 		// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: true, Type: messagepb.ClientResp, Msg: messagepb.ClientReply{Reply: (x.(*applyResult)).resp, ID: r.Header.ID}})
 		if s.slConn != nil {
-			resp := (x.(*applyResult)).resp
-			var data []byte
-			replySize := uint64(0)
-			if resp == nil {
+			if (x.(*applyResult).err) != nil {
+				replySize := uint64(0)
 				replySize = 0
 				data = make([]byte, 0)
-			} else {
-				data, err = proto.Marshal(resp)
-				interpreter.PanicIfMarshalError(err)
-				replySize = uint64(len(data))
-			}
 
-			length := 8*3 + 8 + 8 + replySize
-			reqId, tosend, offset := s.slConn.AllocateRequest(length)
-			binary.LittleEndian.PutUint64(tosend[offset+0:offset+8], 1)                                  // send
-			binary.LittleEndian.PutUint64(tosend[offset+8:offset+16], (uint64)(messagepb.ClientResp))    // type
-			binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], r.Header.ID)                      // Reply Id
-			binary.LittleEndian.PutUint64(tosend[offset+24:offset+32], interpreter.ClientRespType(resp)) // Reply Type
-			if resp == nil {
-				binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], 0) // Reply size
-				// Reply is empty
+				length := 8*3 + 8 + 8 + replySize
+				reqId, tosend, offset := s.slConn.AllocateRequest(length)
+				binary.LittleEndian.PutUint64(tosend[offset+0:offset+8], 1)                                   // send
+				binary.LittleEndian.PutUint64(tosend[offset+8:offset+16], (uint64)(messagepb.ClientRespFail)) // type
+				binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], r.Header.ID)                       // Reply Id
+				binary.LittleEndian.PutUint64(tosend[offset+24:offset+32], 0)                                 // Reply Type
+				binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], 0)                                 // Reply size
+				// interpreter.PanicIfMarshalError(err)
+				ch := s.slConn.Request(tosend)
+				s.slConn.WaitFor(reqId, ch)
 			} else {
-				binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], replySize) // Reply size
-				copy(tosend[offset+40:], data)
+				resp := (x.(*applyResult)).resp
+
+				var data []byte
+				replySize := uint64(0)
+				if resp == nil {
+					replySize = 0
+					data = make([]byte, 0)
+				} else {
+					data, err = proto.Marshal(resp)
+					interpreter.PanicIfMarshalError(err)
+					replySize = uint64(len(data))
+				}
+
+				length := 8*3 + 8 + 8 + replySize
+				reqId, tosend, offset := s.slConn.AllocateRequest(length)
+				binary.LittleEndian.PutUint64(tosend[offset+0:offset+8], 1)                                   // send
+				binary.LittleEndian.PutUint64(tosend[offset+8:offset+16], (uint64)(messagepb.ClientRespSucc)) // type
+				binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], r.Header.ID)                       // Reply Id
+				binary.LittleEndian.PutUint64(tosend[offset+24:offset+32], interpreter.ClientRespType(resp))  // Reply Type
+				if resp == nil {
+					binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], 0) // Reply size
+					// Reply is empty
+				} else {
+					binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], replySize) // Reply size
+					copy(tosend[offset+40:], data)
+				}
+				interpreter.PanicIfMarshalError(err)
+				ch := s.slConn.Request(tosend)
+				s.slConn.WaitFor(reqId, ch)
 			}
-			interpreter.PanicIfMarshalError(err)
-			ch := s.slConn.Request(tosend)
-			s.slConn.WaitFor(reqId, ch)
 		}
 		return x.(*applyResult), nil
 	case <-cctx.Done():

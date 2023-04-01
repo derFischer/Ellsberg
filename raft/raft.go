@@ -1396,6 +1396,8 @@ func stepCandidate(r *raft, m pb.Message) error {
 		}
 	case pb.MsgTimeoutNow:
 		r.logger.Debugf("%x [term %d state %v] ignored MsgTimeoutNow from %x", r.id, r.Term, r.state, m.From)
+	case pb.MsgReadIndex:
+		return ErrProposalDropped
 	}
 	return nil
 }
@@ -1447,6 +1449,7 @@ func stepFollower(r *raft, m pb.Message) error {
 			r.logger.Infof("%x received MsgTimeoutNow from %x but is not promotable", r.id, m.From)
 		}
 	case pb.MsgReadIndex:
+		return ErrProposalDropped
 		if r.lead == None {
 			r.logger.Infof("%x no leader at term %d; dropping index reading msg", r.id, r.Term)
 			return nil
