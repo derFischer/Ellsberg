@@ -340,7 +340,7 @@ func (r *raftNode) processMessages(ms []raftpb.Message) []raftpb.Message {
 			ms[i].To = 0
 		}
 
-		if ms[i].Type == raftpb.MsgAppResp {
+		if ms[i].Type == raftpb.MsgAppResp && len(ms[i].Context) != 0 {
 			if sentAppResp {
 				ms[i].To = 0
 			} else {
