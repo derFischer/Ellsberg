@@ -87,13 +87,18 @@ sds InterpreteCmdRaft(raft_server_t *raft, bool send, size_t req_id, RedisModule
   return cmd;
 }
 
-sds InterpreteCmdRaftReply(raft_server_t *raft, bool send, size_t req_id, const char* reply_proto, size_t reply_proto_len) {
+sds InterpreteCmdRaftReply(raft_server_t *raft, bool send, size_t req_id, const char* reply_proto, size_t reply_proto_len, bool success) {
   sds cmd = sdsempty();
   size_t argc_tosend = 3;
   const char** argv_tosend = (const char**)calloc(argc_tosend, sizeof(char*));
   argv_tosend[0] = send ? "1" : "0"; 
   // msg_type: Client Response
-  argv_tosend[1] = "2";
+  if (success) {
+    argv_tosend[1] = "2";
+  } else {
+    argv_tosend[1] = "3";
+  }
+  // argv_tosend[1] = "2";
   // TODO: msg_id
   sds msg_id = sdsfromlonglong(req_id);
   argv_tosend[2] = msg_id;
@@ -160,10 +165,13 @@ sds InterpreteRaftNode(raft_server_t *raft, bool send, bool add, size_t req_id, 
   return cmd;
 }
 
-sds InterpreteRaftNodeReply(raft_server_t *raft, bool send, bool add, size_t req_id, raft_node_id_t node_id, const char* dbid) {
+sds InterpreteRaftNodeReply(raft_server_t *raft, bool send, bool add, size_t req_id, raft_node_id_t node_id, const char* dbid, bool success) {
   sds cmd = sdsempty();
   const char* send_str = send ? "1" : "0"; 
-  const char* msg_type_str = "2";
+  char* msg_type_str = "2";
+  if (!success) {
+    msg_type_str = "3";
+  }
   sds req_id_sds = sdsfromlonglong(req_id);
   sds node_id_str = sdsfromlonglong(node_id);
 
@@ -198,7 +206,7 @@ sds InterpreteAE(raft_server_t *raft, bool send, raft_msg_id_t req_msg_id, sds j
   int argc_tosend = argc + more_argc;
   argv_tosend[0] = send ? "1" : "0"; 
   // msg_type: RaftRequest
-  argv_tosend[1] = "3";
+  argv_tosend[1] = "4";
   // msg_id
   sds req_msg_id_sds = sdsfromlonglong(req_msg_id);
   argv_tosend[2] = req_msg_id_sds;
@@ -248,7 +256,7 @@ sds InterpreteAER(
   // send=false
   argv_tosend[0] = send ? "1" : "0";  
   // msg_type: RaftResponse
-  argv_tosend[1] = "4";
+  argv_tosend[1] = "5";
   // msg_id
   sds req_msg_id_sds = sdsfromlonglong(req_msg_id);
   argv_tosend[2] = req_msg_id_sds;
@@ -286,7 +294,7 @@ sds InterpreteRV(raft_server_t *raft, bool send, raft_msg_id_t req_msg_id, Redis
   int argc_tosend = argc + more_argc;
   argv_tosend[0] = send ? "1" : "0"; 
   // msg_type: RaftRequest
-  argv_tosend[1] = "3";
+  argv_tosend[1] = "4";
   // TODO: msg_id
   sds req_msg_id_sds = sdsfromlonglong(req_msg_id);
   argv_tosend[2] = req_msg_id_sds;
@@ -346,7 +354,7 @@ sds InterpreteRVR(
   // send=false
   argv_tosend[0] = send ? "1" : "0"; ; 
   // msg_type: RaftResponse
-  argv_tosend[1] = "4";
+  argv_tosend[1] = "5";
   // TODO: msg_id
   sds req_msg_id_sds = sdsfromlonglong(req_msg_id);
   argv_tosend[2] = req_msg_id_sds;

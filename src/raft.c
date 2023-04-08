@@ -419,7 +419,7 @@ void RaftExecuteCommandArray(RedisRaftCtx *rr,
                 // Sending(send client reply)
                 size_t proto_len = 0;
                 const char* proto = RedisModule_CallReplyProto(reply, &proto_len);
-                sds cmd = InterpreteCmdRaftReply(rr->raft, true, /*req_id=*/cmds->req_id, proto, proto_len);
+                sds cmd = InterpreteCmdRaftReply(rr->raft, true, /*req_id=*/cmds->req_id, proto, proto_len, true);
                 size_t cmd_len = sdslen(cmd);
                 raft_forward(rr->raft, &cmd_len, sizeof(size_t));
                 raft_forward(rr->raft, cmd, cmd_len);
@@ -991,8 +991,7 @@ static int raftApplyLog(raft_server_t *raft, void *user_data, raft_entry_t *entr
             RedisModule_ReplyWithLongLong(req->ctx, cfg->id);
             RedisModule_ReplyWithSimpleString(req->ctx, rr->snapshot_info.dbid);
             if (raft_get_forwarder(rr->raft)) {
-                printf("send node add reply (nonvoting)\n");
-                // Sending(send node add reply (nonvoting))
+                printf("send node add reply\n");
                 // sds cmd = InterpreteRaftNodeReply(raft, /*send=*/true, /*add=*/true, entry->req_id, cfg->id, rr->snapshot_info.dbid);
                 // size_t cmd_len = sdslen(cmd);
                 // raft_forward(raft, &cmd_len, sizeof(size_t));
@@ -1003,30 +1002,13 @@ static int raftApplyLog(raft_server_t *raft, void *user_data, raft_entry_t *entr
                 if (req != NULL) {
                     req_id = req->req_id;
                 }
-                sds cmd = InterpreteRaftNodeReply(raft, /*send=*/true, /*add=*/true, req_id, cfg->id, rr->snapshot_info.dbid);
+                sds cmd = InterpreteRaftNodeReply(raft, /*send=*/true, /*add=*/true, req_id, cfg->id, rr->snapshot_info.dbid, true);
                 size_t cmd_len = sdslen(cmd);
                 raft_forward(raft, &cmd_len, sizeof(size_t));
                 raft_forward(raft, cmd, cmd_len);
                 sdsfree(cmd);
             }
             RaftReqFree(req);
-            break;
-        case RAFT_LOGTYPE_ADD_NODE:
-            // cfg = (RaftCfgChange *) entry->data;
-            // if (raft_get_forwarder(rr->raft) && raft_is_leader(rr->raft)) {
-            //     printf("send node add reply (voting) node_id=%d\n", cfg->id);
-            //     // Sending(send node add reply (voting))
-            //     raft_add_node_req_t* req = raft_get_add_node_req_id(raft, cfg->id);
-            //     raft_index_t req_id = 0;
-            //     if (req != NULL) {
-            //         req_id = req->req_id;
-            //     }
-            //     sds cmd = InterpreteRaftNodeReply(raft, /*send=*/true, /*add=*/true, req_id, cfg->id, rr->snapshot_info.dbid);
-            //     size_t cmd_len = sdslen(cmd);
-            //     raft_forward(raft, &cmd_len, sizeof(size_t));
-            //     raft_forward(raft, cmd, cmd_len);
-            //     sdsfree(cmd);
-            // }
             break;
         case RAFT_LOGTYPE_REMOVE_NODE:
             req = entryDetachRaftReq(rr, entry);
@@ -1035,7 +1017,7 @@ static int raftApplyLog(raft_server_t *raft, void *user_data, raft_entry_t *entr
             if (req) {
                 if (raft_get_forwarder(rr->raft)) {
                     // Sending(send node remove reply)
-                    sds cmd = InterpreteRaftNodeReply(raft, /*send=*/true, /*add=*/true, entry->req_id, cfg->id, NULL);
+                    sds cmd = InterpreteRaftNodeReply(raft, /*send=*/true, /*add=*/true, entry->req_id, cfg->id, NULL, true);
                     // size_t cmd_len = sdslen(cmd);
                     // raft_forward(raft, &cmd_len, sizeof(size_t));
                     // raft_forward(raft, cmd, cmd_len);
