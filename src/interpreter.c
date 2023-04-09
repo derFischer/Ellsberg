@@ -101,33 +101,30 @@ sds InterpreteCmdRaftReply(raft_server_t *raft, bool send, size_t req_id, RaftRe
   sds req_id_sds = sdsfromlonglong(req_id);
   argv_tosend[2] = req_id_sds;
 
+  int n;
+  sds reqcmd_sds = sdsempty();
+  const char** cmd_argv = (const char**)calloc(reqcmd->argc, sizeof(char*));
+  TranslateRMArgvOrUseCArgv(reqcmd->argv, NULL, reqcmd->argc, cmd_argv, /*from=*/0);
+  redisFormatSdsCommandArgv(&reqcmd_sds, reqcmd->argc, cmd_argv, NULL);
+  char* firstNewLine = strstr(reqcmd_sds, "\r\n");
+  sdsrange(reqcmd_sds, firstNewLine+2-reqcmd_sds, -1);
+
   char *used_reply_proto = (char*)reply_proto;
   if (reply_proto[0] == '*') {
     // reply of set is like this.
     size_t reply_array_size;
-    int n = sscanf(reply_proto, "*%ld\r\n", &reply_array_size);
-    argc_tosend += reply_array_size + reqcmd->argc;
-    sds reqcmd_sds = sdsempty();
-    const char** cmd_argv = (const char**)calloc(reqcmd->argc, sizeof(char*));
-    TranslateRMArgvOrUseCArgv(reqcmd->argv, NULL, reqcmd->argc, cmd_argv, /*from=*/0);
-    redisFormatSdsCommandArgv(&reqcmd_sds, reqcmd->argc, cmd_argv, NULL);
-    sdsrange(reqcmd_sds, 4, -1);
+    n = sscanf(reply_proto, "*%ld\r\n", &reply_array_size);
     used_reply_proto += n;
-    printf("used_reply_proto: %s\n", used_reply_proto); 
+    argc_tosend += reply_array_size + reqcmd->argc;
     cmd = sdscatprintf(
       cmd, 
       "*%ld\r\n" "$%ld\r\n%s\r\n" "$%ld\r\n%s\r\n" "$%ld\r\n%s\r\n" "%s" "%s", 
       argc_tosend, 1L, argv_tosend[0], 1L, argv_tosend[1], strlen(argv_tosend[2]), argv_tosend[2], used_reply_proto, reqcmd_sds);
-    printf("I forgot when this happens, so exit here. (InterpreteCmdRaftReply)\n");
+    printf("I forgot when this happens, so exit here. (InterpreteCmdRaftReply), and I wrongly used `n` here.\n");
     exit(1);
   } else if (reply_proto[0] == '$') {
     // Get will reply as bulk stirng, like "$5\r\nhello\r\n"
     argc_tosend += 1 + reqcmd->argc;
-    sds reqcmd_sds = sdsempty();
-    const char** cmd_argv = (const char**)calloc(reqcmd->argc, sizeof(char*));
-    TranslateRMArgvOrUseCArgv(reqcmd->argv, NULL, reqcmd->argc, cmd_argv, /*from=*/0);
-    redisFormatSdsCommandArgv(&reqcmd_sds, reqcmd->argc, cmd_argv, NULL);
-    sdsrange(reqcmd_sds, 4, -1);
     cmd = sdscatprintf(
       cmd, 
       "*%ld\r\n" "$%ld\r\n%s\r\n" "$%ld\r\n%s\r\n" "$%ld\r\n%s\r\n" "%s" "%s", 
@@ -135,19 +132,21 @@ sds InterpreteCmdRaftReply(raft_server_t *raft, bool send, size_t req_id, RaftRe
   } else if (reply_proto[0] == '+') {
     // Set will reply as "+OK\r\n"
     argc_tosend += 1 + reqcmd->argc;
-    sds reply_sds = sdsempty();
-    reply_sds = sdscpy(reply_sds, used_reply_proto);
-    sdsrange(reply_sds, 0, -3);
-    sds reqcmd_sds = sdsempty();
-    const char** cmd_argv = (const char**)calloc(reqcmd->argc, sizeof(char*));
-    TranslateRMArgvOrUseCArgv(reqcmd->argv, NULL, reqcmd->argc, cmd_argv, /*from=*/0);
-    redisFormatSdsCommandArgv(&reqcmd_sds, reqcmd->argc, cmd_argv, NULL);
-    sdsrange(reqcmd_sds, 4, -1);
+    cmd = sdscatprintf(
+      cmd, 
+      "*%ld\r\n" "$%ld\r\n%s\r\n" "$%ld\r\n%s\r\n" "$%ld\r\n%s\r\n" "$%ld\r\n%s" "%s", 
+      argc_tosend, 1L, argv_tosend[0], 1L, argv_tosend[1], strlen(argv_tosend[2]), argv_tosend[2], reply_proto_len-3, used_reply_proto+1, reqcmd_sds);
+  } else if (reply_proto[0] == ':') {
+    // HSet will reply like ":10\r\n"
+    argc_tosend += 1 + reqcmd->argc;
     cmd = sdscatprintf(
       cmd, 
       "*%ld\r\n" "$%ld\r\n%s\r\n" "$%ld\r\n%s\r\n" "$%ld\r\n%s\r\n" "$%ld\r\n%s" "%s", 
       argc_tosend, 1L, argv_tosend[0], 1L, argv_tosend[1], strlen(argv_tosend[2]), argv_tosend[2], reply_proto_len-3, used_reply_proto+1, reqcmd_sds);
   } else {
+    sds reply_proto_sds = sdscpy(sdsempty(), reply_proto);
+    reply_proto_sds = DupAndReplaceSplitter(reply_proto_sds, 0);
+    printf("proto:%s\n", reply_proto_sds);
     assert(false);
   }
   
