@@ -153,18 +153,35 @@ void forwarder_send(forwarder_t *fwdr, const void *buf, size_t len) {
     pthread_mutex_unlock(fwdr->mutex);
     return;
   } else {
-    int rc = 0;
-    rc = send(fwdr->out_conn, (void*)(&len), 8, 0);
-    if (rc == -1) {
-      printf("SEND ERROR 1 = %d\n", errno);
-      close(fwdr->out_conn);
-      exit(1);
+    int rc, pos = 0;
+    size_t n = 0;
+    pos = 0;
+    n = 8;
+    while (1) {
+      int rc = send(fwdr->out_conn, (void*)(&len)+pos, n-pos, 0);
+      if (rc == -1) {
+        printf("SEND ERROR 1 = %d\n", errno);
+        close(fwdr->out_conn);
+        exit(1);
+      }
+      pos += rc;
+      if (pos == n) {
+        break;
+      }
     }
-    rc = send(fwdr->out_conn, buf, len, 0);
-    if (rc == -1) {
-      printf("SEND ERROR 2 = %d\n", errno);
-      close(fwdr->out_conn);
-      exit(1);
+    pos = 0;
+    n = len;
+    while (1) {
+      int rc = send(fwdr->out_conn, buf+pos, n-pos, 0);
+      if (rc == -1) {
+        printf("SEND ERROR 1 = %d\n", errno);
+        close(fwdr->out_conn);
+        exit(1);
+      }
+      pos += rc;
+      if (pos == n) {
+        break;
+      }
     }
   }
 }

@@ -414,7 +414,6 @@ void RaftExecuteCommandArray(RedisRaftCtx *rr,
 
         rr->entered_eval = old_entered_eval;
         if (reply_ctx) {
-            RedisModule_ReplyWithCallReply(reply_ctx, reply);
             if (raft_get_forwarder(rr->raft)) {
                 // Sending(send client reply)
                 size_t proto_len = 0;
@@ -424,6 +423,7 @@ void RaftExecuteCommandArray(RedisRaftCtx *rr,
                 raft_forward(rr->raft, cmd, cmd_len);
                 sdsfree(cmd);
             }
+            RedisModule_ReplyWithCallReply(reply_ctx, reply);
         }
 
         RedisModule_FreeCallReply(reply);
@@ -739,6 +739,15 @@ static int raftSendRequestVote(raft_server_t *raft, void *user_data,
 
     /* RAFT.REQUESTVOTE <target_node_id> <src_node_id> <prevote>:<term>:<candidate_id>:<last_log_idx>:<last_log_term> */
     LOG_NOTICE("RAFT.REQUESTVOTE");
+    {
+        if (raft_get_forwarder(raft) && msg->prevote == 0) {
+            // Sending(send request vote)
+            char* cmd = InterpreteRVFormat(raft, raft_node, true, /*TODO: msg_id=*/0, msg);
+            size_t cmd_len = strlen(cmd);
+            raft_forward(raft, cmd, cmd_len);
+            free(cmd);
+        }
+    }
     if (redisAsyncCommand(ConnGetRedisCtx(node->conn), handleRequestVoteResponse,
                           node, "RAFT.REQUESTVOTE %d %d %d:%ld:%d:%ld:%ld",
                           raft_node_get_id(raft_node),
@@ -750,13 +759,6 @@ static int raftSendRequestVote(raft_server_t *raft, void *user_data,
                           msg->last_log_term) != REDIS_OK) {
         NODE_TRACE(node, "failed requestvote");
     } else {
-        if (raft_get_forwarder(raft) && msg->prevote == 0) {
-            // Sending(send request vote)
-            char* cmd = InterpreteRVFormat(raft, raft_node, true, /*TODO: msg_id=*/0, msg);
-            size_t cmd_len = strlen(cmd);
-            raft_forward(raft, cmd, cmd_len);
-            free(cmd);
-        }
         NodeAddPendingResponse(node, false);
     }
 
@@ -866,11 +868,7 @@ static int raftSendAppendEntries(raft_server_t *raft, void *user_data,
         argvlen[6 + i * 2] = e->data_len;
         argv[6 + i * 2] = e->data;
     }
-
-    if (redisAsyncCommandArgv(ConnGetRedisCtx(node->conn), handleAppendEntriesResponse,
-                              node, argc, (const char **) argv, argvlen) != REDIS_OK) {
-        NODE_TRACE(node, "failed appendentries");
-    } else {
+    {
         //if nonvoting, ignore the message
         raft_index_t match_idx = raft_node_get_match_idx(raft_node);
         raft_index_t last_idx = msg->prev_log_idx;
@@ -894,6 +892,11 @@ static int raftSendAppendEntries(raft_server_t *raft, void *user_data,
             raft_forward(raft, cmd, cmd_len);
             sdsfree(cmd);
         }
+    }
+    if (redisAsyncCommandArgv(ConnGetRedisCtx(node->conn), handleAppendEntriesResponse,
+                              node, argc, (const char **) argv, argvlen) != REDIS_OK) {
+        NODE_TRACE(node, "failed appendentries");
+    } else {
         NodeAddPendingResponse(node, false);
     }
 

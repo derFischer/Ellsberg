@@ -149,15 +149,6 @@ static int cmdRaftNode(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
         memcpy(entry->data, &cfg, sizeof(cfg));
         entryAttachRaftReq(rr, entry, req);
 
-        int e = raft_recv_entry(rr->raft, entry, NULL);
-        if (e != 0) {
-            entryDetachRaftReq(rr, entry);
-            replyRaftError(req->ctx, NULL, e);
-            raft_entry_release(entry);
-            RaftReqFree(req);
-            return REDISMODULE_OK;
-        }
-
         //for running: hack: will not send to simulator to pass the check
         // if (raft_get_forwarder(rr->raft)) {
         //     printf("recv node add (nonvoting), commit=%ld\n", raft_get_commit_idx(rr->raft));
@@ -168,6 +159,14 @@ static int cmdRaftNode(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
         //     sdsfree(cmd);
         //     raft_add_node_req(rr->raft, node_id, req_id);
         // }
+        int e = raft_recv_entry(rr->raft, entry, NULL);
+        if (e != 0) {
+            entryDetachRaftReq(rr, entry);
+            replyRaftError(req->ctx, NULL, e);
+            raft_entry_release(entry);
+            RaftReqFree(req);
+            return REDISMODULE_OK;
+        }
 
         raft_entry_release(entry);
 
@@ -202,6 +201,13 @@ static int cmdRaftNode(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
         memcpy(entry->data, &cfg, sizeof(cfg));
         entryAttachRaftReq(rr, entry, req);
 
+        if (raft_get_forwarder(rr->raft)) {
+            // Sending(recv node remove)
+            sds cmd = InterpreteRaftNode(rr->raft, false, /*add=*/false, /*req_id=*/entry->req_id, argv, NULL, argc);
+            // size_t cmd_len = sdslen(cmd);
+            // raft_forward(rr->raft, cmd, cmd_len);
+            sdsfree(cmd);
+        }
         int e = raft_recv_entry(rr->raft, entry, NULL);
         if (e != 0) {
             entryDetachRaftReq(rr, entry);
@@ -209,13 +215,6 @@ static int cmdRaftNode(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
             raft_entry_release(entry);
             RaftReqFree(req);
             return REDISMODULE_OK;
-        }
-        if (raft_get_forwarder(rr->raft)) {
-            // Sending(recv node remove)
-            sds cmd = InterpreteRaftNode(rr->raft, false, /*add=*/false, /*req_id=*/entry->req_id, argv, NULL, argc);
-            // size_t cmd_len = sdslen(cmd);
-            // raft_forward(rr->raft, cmd, cmd_len);
-            sdsfree(cmd);
         }
 
         raft_entry_release(entry);
@@ -363,11 +362,6 @@ static int cmdRaftRequestVote(RedisModuleCtx *ctx, RedisModuleString **argv, int
         return REDISMODULE_OK;
     }
 
-    RedisModule_ReplyWithArray(ctx, 4);
-    RedisModule_ReplyWithLongLong(ctx, resp.prevote);
-    RedisModule_ReplyWithLongLong(ctx, resp.request_term);
-    RedisModule_ReplyWithLongLong(ctx, resp.term);
-    RedisModule_ReplyWithLongLong(ctx, resp.vote_granted);
     if (raft_get_forwarder(rr->raft) && req.prevote == 0) {
         // Sending(send requestvote reply)
         sds cmd = InterpreteRVR(rr->raft, true, /*TODO: req_msg_id=*/0, &resp, /*dst_id=*/src_node_id, /*src_id=*/target_node_id, argv, NULL, argc);
@@ -375,6 +369,11 @@ static int cmdRaftRequestVote(RedisModuleCtx *ctx, RedisModuleString **argv, int
         raft_forward(rr->raft, cmd, cmd_len);
         sdsfree(cmd);
     }
+    RedisModule_ReplyWithArray(ctx, 4);
+    RedisModule_ReplyWithLongLong(ctx, resp.prevote);
+    RedisModule_ReplyWithLongLong(ctx, resp.request_term);
+    RedisModule_ReplyWithLongLong(ctx, resp.term);
+    RedisModule_ReplyWithLongLong(ctx, resp.vote_granted);
 
     return REDISMODULE_OK;
 }
@@ -1087,11 +1086,6 @@ static int cmdRaftAppendEntries(RedisModuleCtx *ctx, RedisModuleString **argv, i
         goto out;
     }
 
-    RedisModule_ReplyWithArray(ctx, 4);
-    RedisModule_ReplyWithLongLong(ctx, resp.term);
-    RedisModule_ReplyWithLongLong(ctx, resp.success);
-    RedisModule_ReplyWithLongLong(ctx, resp.current_idx);
-    RedisModule_ReplyWithLongLong(ctx, resp.msg_id);
     if (raft_get_forwarder(rr->raft)) {
         // Sending(send appendentries reply)
         sds cmd = InterpreteAER(rr->raft, true, msg.msg_id, &resp, /*dst_id=*/src_node_id, /*src_id=*/target_node_id, argv, NULL, argc);
@@ -1099,6 +1093,11 @@ static int cmdRaftAppendEntries(RedisModuleCtx *ctx, RedisModuleString **argv, i
         raft_forward(rr->raft, cmd, cmd_len);
         sdsfree(cmd);
     }
+    RedisModule_ReplyWithArray(ctx, 4);
+    RedisModule_ReplyWithLongLong(ctx, resp.term);
+    RedisModule_ReplyWithLongLong(ctx, resp.success);
+    RedisModule_ReplyWithLongLong(ctx, resp.current_idx);
+    RedisModule_ReplyWithLongLong(ctx, resp.msg_id);
 
 out:
     if (msg.n_entries > 0) {
