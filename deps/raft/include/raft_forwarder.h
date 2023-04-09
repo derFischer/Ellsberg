@@ -18,9 +18,9 @@
 
 forwarder_t *forwarder_new();
 
-void forwarder_send(forwarder_t *fwdr, const void *buf, int len);
+void forwarder_send(forwarder_t *fwdr, const void *buf, size_t len);
 
-void forwarder_recv(forwarder_t *fwdr, void *buf, int len);
+void forwarder_recv(forwarder_t *fwdr, void *buf, size_t len);
 
 void forwarder_close(forwarder_t *fwdr);
 

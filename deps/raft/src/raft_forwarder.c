@@ -16,7 +16,7 @@ void* file_reset_thread(void* arg) {
     char format_time[64];
     sprintf(format_time, "%04d%02d%02d-%02d%02d%02d", now_tm->tm_year+1900, now_tm->tm_mon+1, now_tm->tm_mday, now_tm->tm_hour, now_tm->tm_min, now_tm->tm_sec);
     char log_path[256];
-    sprintf(log_path, "%smessages.%s.%s.data", fwdr->log_dir, getenv("IID"), format_time);
+    sprintf(log_path, "%s/messages.%s.%s.data", fwdr->log_dir, getenv("IID"), format_time);
     fwdr->file = fopen(log_path, "w");
     if (fwdr->file == NULL) {
       printf("ERROR: Cannot open file %s for writing\n", log_path);
@@ -72,7 +72,7 @@ forwarder_t *forwarder_new() {
     }
 
 	  char log_path[256];
-    sprintf(log_path, "%smessages.%s.%s.data", fwdr->log_dir, iid, format_time);
+    sprintf(log_path, "%s/messages.%s.%s.data", fwdr->log_dir, iid, format_time);
     fwdr->file = fopen(log_path, "w");
     if (fwdr->file == NULL) {
       printf("ERROR: Cannot open file %s\n", log_path);
@@ -145,23 +145,31 @@ free_and_return_null:
   return fwdr;
 }
 
-void forwarder_send(forwarder_t *fwdr, const void *buf, int len) { 
+void forwarder_send(forwarder_t *fwdr, const void *buf, size_t len) { 
   if (fwdr->MODE == SIMMODE_FILE) {
     pthread_mutex_lock(fwdr->mutex);
+    fwrite((void*)(&len), 1, 8, fwdr->file);
     fwrite(buf, 1, len, fwdr->file);
     pthread_mutex_unlock(fwdr->mutex);
     return;
   } else {
-    int rc = send(fwdr->out_conn, buf, len, 0);
+    int rc = 0;
+    rc = send(fwdr->out_conn, (void*)(&len), 8, 0);
     if (rc == -1) {
-      printf("SEND ERROR = %d\n", errno);
+      printf("SEND ERROR 1 = %d\n", errno);
+      close(fwdr->out_conn);
+      exit(1);
+    }
+    rc = send(fwdr->out_conn, buf, len, 0);
+    if (rc == -1) {
+      printf("SEND ERROR 2 = %d\n", errno);
       close(fwdr->out_conn);
       exit(1);
     }
   }
 }
 
-void forwarder_recv(forwarder_t *fwdr, void *buf, int len) {
+void forwarder_recv(forwarder_t *fwdr, void *buf, size_t len) {
   printf("haven't check this function yet, maybe buggy, don't call!!\n");
   exit(1);
   memset(buf, 0, len);

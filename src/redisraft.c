@@ -164,7 +164,6 @@ static int cmdRaftNode(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
         //     // Sending(recv node add (nonvoting))
         //     sds cmd = InterpreteRaftNode(rr->raft, false, /*add=*/true, /*req_id=*/req_id, argv, NULL, argc);
         //     size_t cmd_len = sdslen(cmd);
-        //     raft_forward(rr->raft, &cmd_len, sizeof(size_t));
         //     raft_forward(rr->raft, cmd, cmd_len);
         //     sdsfree(cmd);
         //     raft_add_node_req(rr->raft, node_id, req_id);
@@ -215,7 +214,6 @@ static int cmdRaftNode(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
             // Sending(recv node remove)
             sds cmd = InterpreteRaftNode(rr->raft, false, /*add=*/false, /*req_id=*/entry->req_id, argv, NULL, argc);
             // size_t cmd_len = sdslen(cmd);
-            // raft_forward(rr->raft, &cmd_len, sizeof(size_t));
             // raft_forward(rr->raft, cmd, cmd_len);
             sdsfree(cmd);
         }
@@ -353,7 +351,6 @@ static int cmdRaftRequestVote(RedisModuleCtx *ctx, RedisModuleString **argv, int
     //     // Sending(recv reqeustvote)
     //     sds cmd = InterpreteRV(rr->raft, false, /*TODO: raft_msg_id_t=*/0, argv, NULL, argc);
     //     size_t cmd_len = sdslen(cmd);
-    //     raft_forward(rr->raft, &cmd_len, sizeof(size_t));
     //     raft_forward(rr->raft, cmd, cmd_len);
     //     sdsfree(cmd);
     // }
@@ -375,7 +372,6 @@ static int cmdRaftRequestVote(RedisModuleCtx *ctx, RedisModuleString **argv, int
         // Sending(send requestvote reply)
         sds cmd = InterpreteRVR(rr->raft, true, /*TODO: req_msg_id=*/0, &resp, /*dst_id=*/src_node_id, /*src_id=*/target_node_id, argv, NULL, argc);
         size_t cmd_len = sdslen(cmd);
-        raft_forward(rr->raft, &cmd_len, sizeof(size_t));
         raft_forward(rr->raft, cmd, cmd_len);
         sdsfree(cmd);
     }
@@ -919,7 +915,6 @@ static int cmdRaft(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
         // Sending(recv client request)
         sds cmdsds = InterpreteCmdRaft(rr->raft, false, /*req_id=*/cmds.req_id, argv, NULL, argc);
         size_t cmdsds_len = sdslen(cmdsds);
-        raft_forward(rr->raft, &cmdsds_len, sizeof(size_t));
         raft_forward(rr->raft, cmdsds, cmdsds_len);
         sdsfree(cmdsds);
     }
@@ -1075,7 +1070,6 @@ static int cmdRaftAppendEntries(RedisModuleCtx *ctx, RedisModuleString **argv, i
     //     // Sending(recv appendentries)
     //     size_t cmd_len = 0;
     //     sds cmd = InterpreteAE(rr->raft, false, msg.msg_id, sdsempty(), argv, NULL, argc, argvlen, &cmd_len);
-    //     raft_forward(rr->raft, &cmd_len, sizeof(size_t));
     //     raft_forward(rr->raft, cmd, cmd_len);
     //     sdsfree(cmd);
     // }
@@ -1102,7 +1096,6 @@ static int cmdRaftAppendEntries(RedisModuleCtx *ctx, RedisModuleString **argv, i
         // Sending(send appendentries reply)
         sds cmd = InterpreteAER(rr->raft, true, msg.msg_id, &resp, /*dst_id=*/src_node_id, /*src_id=*/target_node_id, argv, NULL, argc);
         size_t cmd_len = sdslen(cmd);
-        raft_forward(rr->raft, &cmd_len, sizeof(size_t));
         raft_forward(rr->raft, cmd, cmd_len);
         sdsfree(cmd);
     }

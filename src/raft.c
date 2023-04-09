@@ -421,7 +421,6 @@ void RaftExecuteCommandArray(RedisRaftCtx *rr,
                 const char* proto = RedisModule_CallReplyProto(reply, &proto_len);
                 sds cmd = InterpreteCmdRaftReply(rr->raft, true, /*req_id=*/cmds->req_id, cmds->commands[i], proto, proto_len, true);
                 size_t cmd_len = sdslen(cmd);
-                raft_forward(rr->raft, &cmd_len, sizeof(size_t));
                 raft_forward(rr->raft, cmd, cmd_len);
                 sdsfree(cmd);
             }
@@ -715,7 +714,6 @@ static void handleRequestVoteResponse(redisAsyncContext *c, void *r, void *privd
         // Sending(recv requestvote response)
         sds cmd = InterpreteRVR(rr->raft, false, /*TODO: msg_id=*/0, &response, /*dst_id=*/raft_get_nodeid(rr->raft), /*src_id=*/raft_node_get_id(raft_node), NULL, NULL, 0);
         size_t cmd_len = sdslen(cmd);
-        raft_forward(rr->raft, &cmd_len, sizeof(size_t));
         raft_forward(rr->raft, cmd, cmd_len);
         sdsfree(cmd);
     }
@@ -756,7 +754,6 @@ static int raftSendRequestVote(raft_server_t *raft, void *user_data,
             // Sending(send request vote)
             char* cmd = InterpreteRVFormat(raft, raft_node, true, /*TODO: msg_id=*/0, msg);
             size_t cmd_len = strlen(cmd);
-            raft_forward(raft, &cmd_len, sizeof(size_t));
             raft_forward(raft, cmd, cmd_len);
             free(cmd);
         }
@@ -808,7 +805,6 @@ static void handleAppendEntriesResponse(redisAsyncContext *c, void *r, void *pri
         // Sending(recv appendentries response)
         sds cmd = InterpreteAER(rr->raft, false, /*TODO: msg_id=*/0, &response, /*dst_id=*/raft_get_nodeid(rr->raft), /*src_id=*/raft_node_get_id(raft_node), NULL, NULL, 0);
         size_t cmd_len = sdslen(cmd);
-        raft_forward(rr->raft, &cmd_len, sizeof(size_t));
         raft_forward(rr->raft, cmd, cmd_len);
         sdsfree(cmd);
     }
@@ -895,7 +891,6 @@ static int raftSendAppendEntries(raft_server_t *raft, void *user_data,
             }
             size_t cmd_len = 0;
             sds cmd = InterpreteAE(raft, true, msg->msg_id, joined_req_ids, NULL, argv, argc, argvlen, &cmd_len);
-            raft_forward(raft, &cmd_len, sizeof(size_t));
             raft_forward(raft, cmd, cmd_len);
             sdsfree(cmd);
         }
@@ -1019,7 +1014,6 @@ static int raftApplyLog(raft_server_t *raft, void *user_data, raft_entry_t *entr
                     // Sending(send node remove reply)
                     sds cmd = InterpreteRaftNodeReply(raft, /*send=*/true, /*add=*/true, entry->req_id, cfg->id, NULL, true);
                     // size_t cmd_len = sdslen(cmd);
-                    // raft_forward(raft, &cmd_len, sizeof(size_t));
                     // raft_forward(raft, cmd, cmd_len);
                     sdsfree(cmd);
                 }
