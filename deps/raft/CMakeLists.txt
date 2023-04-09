@@ -18,7 +18,7 @@ macro(define_test name)
             tests/linked_list_queue.c
             tests/mock_send_functions.c)
 
-    target_link_libraries(${name} raft)
+    target_link_libraries(${name} raft pthread)
     target_include_directories(${name} PRIVATE include/)
     add_test(NAME ${name} COMMAND $<TARGET_FILE:${name}>)
 endmacro()

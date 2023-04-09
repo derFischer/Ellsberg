@@ -54,6 +54,8 @@ void RaftRedisCommandArrayMove(RaftRedisCommandArray *target, RaftRedisCommandAr
 
     target->asking |= source->asking;
     target->client_id = source->client_id;
+
+    target->req_id = source->req_id;
 }
 
 /* Free a RaftRedisCommand */

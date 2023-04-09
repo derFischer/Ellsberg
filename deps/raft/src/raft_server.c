@@ -111,23 +111,13 @@ raft_server_t* raft_new_with_log(const raft_log_impl_t *log_impl, void *log_arg)
     me->auto_flush = 1;
     me->exec_deadline = LLONG_MAX;
     me->msg_id = 0;
-    // init forwarder
-    // char *use_forwarder = getenv("USE_FORWARDER");
-    // if (use_forwarder && strcmp(use_forwarder, "1") == 0) {
-        char *IID = getenv("IID");
-        char server_sock_path[1024] = "/tmp/server.sock.";
-        char client_sock_path[1024] = "/tmp/client.sock.";
-        sprintf(server_sock_path, "/tmp/server.%s.sock", IID);
-        sprintf(client_sock_path, "/tmp/client.%s.sock", IID);
-        me->fwdr = forwarder_new(server_sock_path, client_sock_path);
 
-        me->req_array_size = 5;
-        me->num_added_nodes = 0;
-        me->add_node_req_id = malloc(sizeof(raft_add_node_req_t) * me->req_array_size);
-        memset(me->add_node_req_id, 0, sizeof(raft_add_node_req_t) * me->req_array_size);
-    // } else {
-    //     me->fwdr = NULL;
-    // }
+    me->fwdr = forwarder_new();
+
+    me->req_array_size = 5;
+    me->num_added_nodes = 0;
+    me->add_node_req_id = malloc(sizeof(raft_add_node_req_t) * me->req_array_size);
+    memset(me->add_node_req_id, 0, sizeof(raft_add_node_req_t) * me->req_array_size);
 
     raft_update_quorum_meta(me, me->msg_id);
 

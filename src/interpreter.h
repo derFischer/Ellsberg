@@ -5,7 +5,7 @@
 
 /* Client */
 sds InterpreteCmdRaft(raft_server_t *raft, bool send, size_t req_id, RedisModuleString **rmargv, char **cargv, int argc);
-sds InterpreteCmdRaftReply(raft_server_t *raft, bool send, size_t req_id, const char* reply_proto, size_t reply_proto_len, bool success);
+sds InterpreteCmdRaftReply(raft_server_t *raft, bool send, size_t req_id, RaftRedisCommand *reqcmd, const char* reply_proto, size_t reply_proto_len, bool success);
 sds InterpreteRaftNode(raft_server_t *raft, bool send, bool add, size_t req_id, RedisModuleString **rmargv, char **cargv, int argc);
 sds InterpreteRaftNodeReply(raft_server_t *raft, bool send, bool add, size_t req_id, raft_node_id_t node_id, const char* dbid, bool success);
 

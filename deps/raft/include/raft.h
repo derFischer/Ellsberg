@@ -11,6 +11,9 @@
 #define RAFT_H_
 
 #include <stddef.h>
+#include <stdint.h>
+#include <pthread.h>
+#include <stdio.h>
 
 #include "raft_types.h"
 
@@ -1618,10 +1621,42 @@ int raft_pending_operations(raft_server_t *me);
  */
 int raft_restore_log(raft_server_t *me);
 
+/**
+ *
+ * Forwarder related
+ * 
+ */
+#define SIMMODE_T int
+#define SIMCONNTYPE_T int
+
+#define SIMMODE_NONE 0
+#define SIMMODE_ASYNC 1
+#define SIMMODE_SYNC 2
+#define SIMMODE_FILE 3
+
+#define SIMCONNTYPE_TCP 0
+#define SIMCONNTYPE_UNIX 1
+#define SIMCONNTYPE_PIPE 2
+
 typedef struct forwarder forwarder_t;
 
 struct forwarder {
-  int sock;  // me
+    SIMMODE_T MODE;
+    SIMCONNTYPE_T CONNTYPE;
+
+    int out_conn;
+    int in_conn;
+
+	pthread_mutex_t *mutex;
+    pthread_cond_t *cond;
+	uint64_t nextReqId;
+
+	int OutConn; // fd
+	int InConn; // fd
+
+	// For FILE mode
+    FILE* file;
+	char log_dir[64];
 };
 
 typedef struct raft_add_node_req {

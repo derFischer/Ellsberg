@@ -419,7 +419,7 @@ void RaftExecuteCommandArray(RedisRaftCtx *rr,
                 // Sending(send client reply)
                 size_t proto_len = 0;
                 const char* proto = RedisModule_CallReplyProto(reply, &proto_len);
-                sds cmd = InterpreteCmdRaftReply(rr->raft, true, /*req_id=*/cmds->req_id, proto, proto_len, true);
+                sds cmd = InterpreteCmdRaftReply(rr->raft, true, /*req_id=*/cmds->req_id, cmds->commands[i], proto, proto_len, true);
                 size_t cmd_len = sdslen(cmd);
                 raft_forward(rr->raft, &cmd_len, sizeof(size_t));
                 raft_forward(rr->raft, cmd, cmd_len);
