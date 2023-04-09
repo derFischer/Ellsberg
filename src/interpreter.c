@@ -79,7 +79,7 @@ sds InterpreteCmdRaft(raft_server_t *raft, bool send, size_t req_id, RedisModule
   redisFormatSdsCommandArgv(&cmd, argc_tosend, argv_tosend, NULL);
   
   sds replaced = DupAndReplaceSplitter(cmd, 0);
-  printf("[%s] cmdRaft: < %s >\n", send ? "send" : "recv", replaced);
+  // printf("[%s] cmdRaft: < %s >\n", send ? "send" : "recv", replaced);
 
   sdsfree(replaced);
   free(argv_tosend);
@@ -151,7 +151,7 @@ sds InterpreteCmdRaftReply(raft_server_t *raft, bool send, size_t req_id, RaftRe
   }
   
   sds replaced = DupAndReplaceSplitter(cmd, 0);
-  printf("[%s] cmdRaftReply: < %s >\n", send ? "send" : "recv", replaced);
+  // printf("[%s] cmdRaftReply: < %s >\n", send ? "send" : "recv", replaced);
 
   sdsfree(req_id_sds);
   sdsfree(replaced);
@@ -177,7 +177,7 @@ sds InterpreteRaftNode(raft_server_t *raft, bool send, bool add, size_t req_id, 
   redisFormatSdsCommandArgv(&cmd, argc_tosend, argv_tosend, NULL);
   
   sds replaced = DupAndReplaceSplitter(cmd, 0);
-  printf("[%s] RaftNode(%s): < %s >\n", send ? "send" : "recv", add ? "ADDVOTING" : "REMOVE", replaced);
+  // printf("[%s] RaftNode(%s): < %s >\n", send ? "send" : "recv", add ? "ADDVOTING" : "REMOVE", replaced);
 
   sdsfree(replaced);
   free(argv_tosend);
@@ -209,7 +209,7 @@ sds InterpreteRaftNodeReply(raft_server_t *raft, bool send, bool add, size_t req
   }
 
   sds replaced = DupAndReplaceSplitter(cmd, 0);
-  printf("[%s] RaftNodeReply(%s): < %s >\n", send ? "send" : "recv", add ? "ADD" : "REMOVE", replaced);
+  // printf("[%s] RaftNodeReply(%s): < %s >\n", send ? "send" : "recv", add ? "ADD" : "REMOVE", replaced);
 
   sdsfree(req_id_sds);
   sdsfree(node_id_str);
@@ -249,7 +249,7 @@ sds InterpreteAE(raft_server_t *raft, bool send, raft_msg_id_t req_msg_id, sds j
   redisFormatSdsCommandArgv(&cmd, argc_tosend, argv_tosend, argvlen_tosend);
   
   sds replaced = DupAndReplaceSplitter(cmd, total_len);
-  printf("[%s] cmdRaftAppendEntries: < %s >\n", send ? "send" : "recv", replaced);
+  // printf("[%s] cmdRaftAppendEntries: < %s >\n", send ? "send" : "recv", replaced);
 
   sdsfree(replaced);
   free(argv_tosend);
@@ -294,7 +294,7 @@ sds InterpreteAER(
   redisFormatSdsCommandArgv(&cmd, argc_tosend, argv_tosend, NULL);
   
   sds replaced = DupAndReplaceSplitter(cmd, 0);
-  printf("[%s] cmdRaftAppendEntriesResponse: < %s >\n", send ? "send" : "recv", replaced);
+  // printf("[%s] cmdRaftAppendEntriesResponse: < %s >\n", send ? "send" : "recv", replaced);
 
   sdsfree((sds)argv_tosend[2]);
   sdsfree((sds)argv_tosend[4]);
@@ -324,7 +324,7 @@ sds InterpreteRV(raft_server_t *raft, bool send, raft_msg_id_t req_msg_id, Redis
   redisFormatSdsCommandArgv(&cmd, argc_tosend, argv_tosend, NULL);
   
   sds replaced = DupAndReplaceSplitter(cmd, 0);
-  printf("[%s] cmdRaftRequestVote: < %s >\n", send ? "send" : "recv", replaced);
+  // printf("[%s] cmdRaftRequestVote: < %s >\n", send ? "send" : "recv", replaced);
 
   sdsfree(replaced);
   free(argv_tosend);
@@ -350,7 +350,7 @@ char* InterpreteRVFormat(raft_server_t *raft, raft_node_t *raft_node, bool send,
   sds cmd = sdsempty();
   cmd = sdscpy(cmd, ccmd);
   sds replaced = DupAndReplaceSplitter(cmd, 0);
-  printf("[%s] cmdRaftRequestVote: < %s >\n", send ? "send" : "recv", replaced);
+  // printf("[%s] cmdRaftRequestVote: < %s >\n", send ? "send" : "recv", replaced);
 
   sdsfree(cmd);
   sdsfree(replaced);
@@ -392,7 +392,7 @@ sds InterpreteRVR(
   redisFormatSdsCommandArgv(&cmd, argc_tosend, argv_tosend, NULL);
 
   sds replaced = DupAndReplaceSplitter(cmd, 0);
-  printf("[%s] cmdRaftRequestVoteResponse: < %s >\n", send ? "send" : "recv", replaced);
+  // printf("[%s] cmdRaftRequestVoteResponse: < %s >\n", send ? "send" : "recv", replaced);
 
   sdsfree((sds)argv_tosend[2]);
   sdsfree((sds)argv_tosend[4]);

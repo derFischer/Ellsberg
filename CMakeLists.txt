@@ -35,7 +35,7 @@ enable_testing()
 
 if (NOT CMAKE_BUILD_TYPE)
     message(STATUS "No build type selected, defaulting to Release")
-    set(CMAKE_BUILD_TYPE "Debug")
+    set(CMAKE_BUILD_TYPE "Release")
 endif ()
 
 message(STATUS "Main build type: ${CMAKE_BUILD_TYPE}")
