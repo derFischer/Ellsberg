@@ -56,10 +56,11 @@ forwarder_t *forwarder_new() {
 
   printf("RPCConnection Setup: MODE=%d, CONNTYPE=%d\n", fwdr->MODE, fwdr->CONNTYPE);
 
+  fwdr->mutex = malloc(sizeof(pthread_mutex_t));
+  pthread_mutex_init(fwdr->mutex, NULL);
+
   char *iid = getenv("IID");
   if (fwdr->MODE == SIMMODE_FILE) {
-    fwdr->mutex = malloc(sizeof(pthread_mutex_t));
-    pthread_mutex_init(fwdr->mutex, NULL);
     time_t now = time(NULL);
 		struct tm *now_tm = localtime(&now);
     char format_time[64];
@@ -145,44 +146,54 @@ free_and_return_null:
   return fwdr;
 }
 
+void send_until_all(int fd, const void *buf, size_t len) {
+  size_t n = len;
+  int pos = 0;
+  while (1) {
+    int rc = send(fd, buf+pos, n-pos, 0);
+    if (rc == -1) {
+      printf("send ERROR = %d\n", errno);
+      close(fd);
+      exit(1);
+    }
+    pos += rc;
+    if (pos == n) {
+      break;
+    }
+  }
+}
+
+void fwrite_until_all(FILE* fd, const void *buf, size_t len) {
+  size_t n = len;
+  int pos = 0;
+  while (1) {
+    int rc = fwrite(buf+pos, 1, n-pos, fd);
+    if (rc == -1) {
+      printf("fwrite ERROR = %d\n", errno);
+      close(fd);
+      exit(1);
+    }
+    pos += rc;
+    if (pos == n) {
+      break;
+    }
+  }
+}
+
 void forwarder_send(forwarder_t *fwdr, const void *buf, size_t len) { 
   if (fwdr->MODE == SIMMODE_FILE) {
     pthread_mutex_lock(fwdr->mutex);
-    fwrite((void*)(&len), 1, 8, fwdr->file);
-    fwrite(buf, 1, len, fwdr->file);
+    fwrite_until_all(fwdr->file, (void*)(&len), 8);
+    fwrite_until_all(fwdr->file, buf, len);
+    // fwrite((void*)(&len), 1, 8, fwdr->file);
+    // fwrite(buf, 1, len, fwdr->file);
     pthread_mutex_unlock(fwdr->mutex);
     return;
   } else {
-    int rc, pos = 0;
-    size_t n = 0;
-    pos = 0;
-    n = 8;
-    while (1) {
-      int rc = send(fwdr->out_conn, (void*)(&len)+pos, n-pos, 0);
-      if (rc == -1) {
-        printf("SEND ERROR 1 = %d\n", errno);
-        close(fwdr->out_conn);
-        exit(1);
-      }
-      pos += rc;
-      if (pos == n) {
-        break;
-      }
-    }
-    pos = 0;
-    n = len;
-    while (1) {
-      int rc = send(fwdr->out_conn, buf+pos, n-pos, 0);
-      if (rc == -1) {
-        printf("SEND ERROR 1 = %d\n", errno);
-        close(fwdr->out_conn);
-        exit(1);
-      }
-      pos += rc;
-      if (pos == n) {
-        break;
-      }
-    }
+    pthread_mutex_lock(fwdr->mutex);
+    send_until_all(fwdr->out_conn, (void*)(&len), 8);
+    send_until_all(fwdr->out_conn, buf, len);
+    pthread_mutex_unlock(fwdr->mutex);
   }
 }
 

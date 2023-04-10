@@ -870,11 +870,11 @@ static int raftSendAppendEntries(raft_server_t *raft, void *user_data,
     }
     {
         //if nonvoting, ignore the message
-        raft_index_t match_idx = raft_node_get_match_idx(raft_node);
-        raft_index_t last_idx = msg->prev_log_idx;
-        raft_entry_t *ety = raft_get_entry_from_idx(raft, last_idx);
+        // raft_index_t match_idx = raft_node_get_match_idx(raft_node);
+        // raft_index_t last_idx = msg->prev_log_idx;
+        // raft_entry_t *ety = raft_get_entry_from_idx(raft, last_idx);
 
-        if (raft_get_forwarder(raft) && (!((match_idx < last_idx) && ety->type == RAFT_LOGTYPE_ADD_NONVOTING_NODE))) {
+        if (raft_get_forwarder(raft)){// && (!((match_idx < last_idx) && ety->type == RAFT_LOGTYPE_ADD_NONVOTING_NODE))) {
             // Sending(send append entries)
             sds joined_req_ids;
             if (msg->n_entries > 0) {
@@ -1609,7 +1609,7 @@ void RaftLibraryInit(RedisRaftCtx *rr, bool cluster_init)
 
     if (raft_config(rr->raft, 1, RAFT_CONFIG_ELECTION_TIMEOUT, eltimeo) != 0 ||
         raft_config(rr->raft, 1, RAFT_CONFIG_REQUEST_TIMEOUT, reqtimeo) != 0 ||
-        raft_config(rr->raft, 1, RAFT_CONFIG_AUTO_FLUSH, 0) != 0 ||
+        raft_config(rr->raft, 1, RAFT_CONFIG_AUTO_FLUSH, 1) != 0 ||
         raft_config(rr->raft, 1, RAFT_CONFIG_NONBLOCKING_APPLY, 1) != 0) {
         PANIC("Failed to configure libraft");
     }
