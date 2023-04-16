@@ -198,6 +198,8 @@ static int cmdRaftNode(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
         raft_entry_req_t *entry = raft_entry_new(sizeof(cfg));
         entry->id = rand();
         entry->type = RAFT_LOGTYPE_REMOVE_NODE;
+        raft_req_id_t req_id = raft_node_next_reqid(raft_get_my_node(rr->raft));
+        entry->req_id = req_id;
         memcpy(entry->data, &cfg, sizeof(cfg));
         entryAttachRaftReq(rr, entry, req);
 

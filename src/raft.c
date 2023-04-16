@@ -826,9 +826,16 @@ static int raftSendAppendEntries(raft_server_t *raft, void *user_data,
     char **argv = NULL;
     size_t *argvlen = NULL;
 
+    if (msg->n_entries != 0) {
+        printf("!!!\n");
+    }
+
     if (!ConnIsConnected(node->conn)) {
         NODE_TRACE(node, "not connected, state=%s", ConnGetStateStr(node->conn));
         return 0;
+    }
+    if (msg->n_entries != 0) {
+        printf("???\n");
     }
 
     argv = RedisModule_Alloc(sizeof(argv[0]) * argc);
@@ -875,6 +882,9 @@ static int raftSendAppendEntries(raft_server_t *raft, void *user_data,
         // raft_entry_t *ety = raft_get_entry_from_idx(raft, last_idx);
 
         if (raft_get_forwarder(raft)){// && (!((match_idx < last_idx) && ety->type == RAFT_LOGTYPE_ADD_NONVOTING_NODE))) {
+            if (msg->n_entries != 0) {
+                printf("prev_log_idx=%ld\n", msg->prev_log_idx);
+            }
             // Sending(send append entries)
             sds joined_req_ids;
             if (msg->n_entries > 0) {
