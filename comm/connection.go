@@ -47,6 +47,7 @@ type RPCConnection struct {
 	bufferedData [][]byte
 	file         *os.File
 	logDir       string
+	msgCount     uint64
 }
 
 func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
@@ -89,6 +90,7 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 
 	if MODE == FILE {
 		c.mutex = &sync.RWMutex{}
+		c.msgCount = 0
 		c.bufferedData = make([][]byte, 0)
 		now := time.Now()
 		formatTime := fmt.Sprintf("%04d%02d%02d-%02d%02d%02d", now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second())
@@ -170,9 +172,12 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 		}()
 	} else if MODE == FILE {
 		go func() {
+			time.Sleep(30 * time.Second)
+			fmt.Printf("\033[1;31mstart timing\033[0m: %v\n", c.msgCount)
 			for {
 				// new file every 1 minutes
-				time.Sleep(60 * time.Second)
+				time.Sleep(300 * time.Second)
+				fmt.Printf("\033[1;31mafter 300s\033[0m: %v\n", c.msgCount)
 				c.mutex.Lock()
 				c.file.Sync()
 				c.file.Close()
@@ -227,6 +232,7 @@ func (c *RPCConnection) Request(reqbytes []byte) chan bool {
 		}
 	} else {
 		c.mutex.Lock()
+		c.msgCount++
 		n, err := c.file.Write(reqbytes)
 		if err != nil {
 			panic(fmt.Sprintf("Write to file failed, err:%v\n", err))
