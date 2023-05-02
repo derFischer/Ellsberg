@@ -35,6 +35,8 @@ var MODE = ASYNC
 var CONNTYPE = PIPE
 
 type RPCConnection struct {
+	MyId      uint64
+	Ids       []uint64
 	mutex     *sync.RWMutex
 	cond      *sync.Cond
 	nextReqId uint64
@@ -46,6 +48,7 @@ type RPCConnection struct {
 	// For FILE mode
 	bufferedData [][]byte
 	file         *os.File
+	metaFile     *os.File
 	logDir       string
 	msgCount     uint64
 }
@@ -86,6 +89,9 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 	var err error
 	c = new(RPCConnection)
 
+	c.MyId = myId
+	c.Ids = ids
+
 	iid := os.Getenv("IID")
 
 	if MODE == FILE {
@@ -102,6 +108,18 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 		c.file, err = os.OpenFile(filepath.Join(c.logDir, fmt.Sprintf("messages.%s.%s.data", iid, formatTime)), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
 		if err != nil {
 			panic(fmt.Sprintf("Cannot open file: %v", err))
+		}
+		c.metaFile, err = os.OpenFile(filepath.Join(c.logDir, fmt.Sprintf("messages.%s.%s.meta", iid, formatTime)), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+		if err != nil {
+			panic(fmt.Sprintf("Cannot open file: %v", err))
+		}
+		f, err := os.OpenFile(filepath.Join(c.logDir, "cluster.meta"), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+		if err != nil {
+			panic(fmt.Sprintf("Cannot open file: %v", err))
+		}
+		f.WriteString(fmt.Sprintf("%d\n", c.MyId))
+		for _, id := range c.Ids {
+			f.WriteString(fmt.Sprintf("%d\n", id))
 		}
 	}
 
@@ -172,18 +190,34 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 		}()
 	} else if MODE == FILE {
 		go func() {
-			time.Sleep(30 * time.Second)
-			fmt.Printf("\033[1;31mstart timing\033[0m: %v\n", c.msgCount)
+			time.Sleep(10 * time.Second)
 			for {
+				startMsgCount := c.msgCount
+				fmt.Printf("\033[1;31mstart timing\033[0m: %v\n", startMsgCount)
 				// new file every 1 minutes
-				time.Sleep(300 * time.Second)
-				fmt.Printf("\033[1;31mafter 300s\033[0m: %v\n", c.msgCount)
+				period := 30
+				time.Sleep(time.Duration(period) * time.Second)
 				c.mutex.Lock()
+				endMsgCount := c.msgCount
+				fmt.Printf("\033[1;31mafter %ds\033[0m: %v\n", period, endMsgCount)
+				// save for data file
 				c.file.Sync()
 				c.file.Close()
+				// save for meta file
+				c.metaFile.WriteString(fmt.Sprintf("%d\n%d\n", startMsgCount, endMsgCount))
+				c.metaFile.Sync()
+				c.metaFile.Close()
+				// start new data file and meta file
 				now := time.Now()
 				formatTime := fmt.Sprintf("%04d%02d%02d-%02d%02d%02d", now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second())
 				c.file, err = os.OpenFile(filepath.Join(c.logDir, fmt.Sprintf("messages.%s.%s.data", iid, formatTime)), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+				if err != nil {
+					panic(fmt.Sprintf("Cannot open file: %v", err))
+				}
+				c.metaFile, err = os.OpenFile(filepath.Join(c.logDir, fmt.Sprintf("messages.%s.%s.meta", iid, formatTime)), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+				if err != nil {
+					panic(fmt.Sprintf("Cannot open file: %v", err))
+				}
 				c.mutex.Unlock()
 			}
 		}()
