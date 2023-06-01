@@ -51,6 +51,7 @@ type RPCConnection struct {
 	metaFile     *os.File
 	logDir       string
 	msgCount     uint64
+	reqBytesCh   chan []byte
 }
 
 func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
@@ -163,7 +164,7 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 		c.cond = sync.NewCond(c.mutex)
 		c.doneIds = new(sync.Map)
 		go func() {
-			bytes := make([]byte, 16)
+			bytes := make([]byte, 24)
 			for {
 				// The read will block until there is data in buffer,
 				// so this won't occupy too much CPU cycles.
@@ -180,49 +181,73 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 				if string(bytes[:8]) != "nyusimul" {
 					panic("Read abnormal data from conn failed\n")
 				}
+				success := binary.LittleEndian.Uint64(bytes[16:24]) == 1
 				reqId := c.ExtractReqId(bytes)
 				ch, loaded := c.doneIds.LoadAndDelete(reqId)
 				if !loaded {
 					panic("Read from conn failed\n")
 				}
-				ch.(chan bool) <- true
+				ch.(chan bool) <- success
 			}
 		}()
 	} else if MODE == FILE {
+		c.reqBytesCh = make(chan []byte, 1024)
 		go func() {
-			time.Sleep(10 * time.Second)
+			writeToFile := func(f *os.File, reqBytes []byte) {
+				c.msgCount++
+				n, err := f.Write(reqBytes)
+				if err != nil {
+					panic(fmt.Sprintf("Write to file failed, err:%v\n", err))
+				}
+				if n != len(reqBytes) {
+					panic(fmt.Sprintf("Write to conn failed, n:%v, len(reqBytes):%v\n", n, len(reqBytes)))
+				}
+			}
+
+			timeAfter := time.After(30 * time.Second)
+			period := 120
+			warmupDone := false
+			for !warmupDone {
+				select {
+				case reqBytes := <-c.reqBytesCh:
+					writeToFile(c.file, reqBytes)
+				case <-timeAfter:
+					warmupDone = true
+				}
+			}
+			timeAfter = time.After(time.Duration(period) * time.Second)
+			startMsgCount := c.msgCount
+			fmt.Printf("\033[1;31mstart timing\033[0m: %v\n", startMsgCount)
 			for {
-				startMsgCount := c.msgCount
-				fmt.Printf("\033[1;31mstart timing\033[0m: %v\n", startMsgCount)
-				// new file every 1 minutes
-				period := 30
-				time.Sleep(time.Duration(period) * time.Second)
-				c.mutex.Lock()
-				endMsgCount := c.msgCount
-				fmt.Printf("\033[1;31mafter %ds\033[0m: %v\n", period, endMsgCount)
-				// save for data file
-				c.file.Sync()
-				c.file.Close()
-				// save for meta file
-				c.metaFile.WriteString(fmt.Sprintf("%d\n%d\n", startMsgCount, endMsgCount))
-				c.metaFile.Sync()
-				c.metaFile.Close()
-				// start new data file and meta file
-				now := time.Now()
-				formatTime := fmt.Sprintf("%04d%02d%02d-%02d%02d%02d", now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second())
-				c.file, err = os.OpenFile(filepath.Join(c.logDir, fmt.Sprintf("messages.%s.%s.data", iid, formatTime)), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
-				if err != nil {
-					panic(fmt.Sprintf("Cannot open file: %v", err))
+				select {
+				case reqBytes := <-c.reqBytesCh:
+					writeToFile(c.file, reqBytes)
+				case <-timeAfter:
+					endMsgCount := c.msgCount
+					fmt.Printf("\033[1;31mafter %ds\033[0m: %v\n", period, endMsgCount)
+					// save for data file
+					c.file.Sync()
+					c.file.Close()
+					// save for meta file
+					c.metaFile.WriteString(fmt.Sprintf("%d\n%d\n", startMsgCount, endMsgCount))
+					c.metaFile.Sync()
+					c.metaFile.Close()
+					// start new data file and meta file
+					now := time.Now()
+					formatTime := fmt.Sprintf("%04d%02d%02d-%02d%02d%02d", now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second())
+					c.file, err = os.OpenFile(filepath.Join(c.logDir, fmt.Sprintf("messages.%s.%s.data", iid, formatTime)), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+					if err != nil {
+						panic(fmt.Sprintf("Cannot open file: %v", err))
+					}
+					c.metaFile, err = os.OpenFile(filepath.Join(c.logDir, fmt.Sprintf("messages.%s.%s.meta", iid, formatTime)), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+					if err != nil {
+						panic(fmt.Sprintf("Cannot open file: %v", err))
+					}
+					timeAfter = time.After(time.Duration(period) * time.Second)
 				}
-				c.metaFile, err = os.OpenFile(filepath.Join(c.logDir, fmt.Sprintf("messages.%s.%s.meta", iid, formatTime)), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
-				if err != nil {
-					panic(fmt.Sprintf("Cannot open file: %v", err))
-				}
-				c.mutex.Unlock()
 			}
 		}()
 	}
-
 	return c
 }
 
@@ -265,22 +290,17 @@ func (c *RPCConnection) Request(reqbytes []byte) chan bool {
 			panic(fmt.Sprintf("Write to conn failed, n:%v, len(reqbytes):%v\n", n, len(reqbytes)))
 		}
 	} else {
-		c.mutex.Lock()
-		c.msgCount++
-		n, err := c.file.Write(reqbytes)
-		if err != nil {
-			panic(fmt.Sprintf("Write to file failed, err:%v\n", err))
-		}
-		if n != len(reqbytes) {
-			panic(fmt.Sprintf("Write to conn failed, n:%v, len(reqbytes):%v\n", n, len(reqbytes)))
-		}
-		c.mutex.Unlock()
+		// Let a goroutine to actually write to file.
+		c.reqBytesCh <- reqbytes
 	}
 	return ch
 }
 
 func (c *RPCConnection) WaitFor(reqId uint64, ch chan bool) {
 	if MODE == SYNC {
-		<-ch
+		success := <-ch
+		if !success {
+			panic(fmt.Sprintf("Request %v failed\n", reqId))
+		}
 	}
 }

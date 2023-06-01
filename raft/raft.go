@@ -717,7 +717,7 @@ func (r *raft) tickElection() {
 	r.electionElapsed++
 
 	// hack: reconfig
-	// if (r.id == 13986752455972970435 && r.Term == 1) || (r.id == 6302345963673959308 && r.Term == 2) {
+	// if (r.id == 0xc7650337f7e099ff && r.Term == 1) || (r.id == 0xb5aa32b3a17abb1c && r.Term == 2) {
 	if r.promotable() && r.pastElectionTimeout() {
 		r.electionElapsed = 0
 		r.Step(pb.Message{From: r.id, Type: pb.MsgHup})

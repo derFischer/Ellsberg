@@ -571,7 +571,7 @@ func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState) Ready {
 	}
 
 	// hack: reconfig
-	// if r.isFollower() && r.raftLog.lastIndex() > 12 || r.Term == 3 && r.raftLog.committed < 17 {
+	// if r.isFollower() && r.raftLog.lastIndex() > 8 || r.Term == 3 && r.raftLog.committed < 13 {
 	// 	rd.CommittedEntries = nil
 	// }
 
