@@ -16,10 +16,11 @@ import (
 type MODE_T uint64
 
 const (
-	NONE  MODE_T = 0 // means don't forward to simulator
-	ASYNC MODE_T = 1
-	SYNC  MODE_T = 2
-	FILE  MODE_T = 3
+	NONE        MODE_T = 0 // means don't forward to simulator
+	ASYNC       MODE_T = 1
+	SYNC        MODE_T = 2
+	FILE        MODE_T = 3
+	SYNCANDFILE MODE_T = 4
 )
 
 // CONNTYPE = [tcp|unix|pipe]
@@ -66,6 +67,8 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 			MODE = ASYNC
 		case "FILE":
 			MODE = FILE
+		case "SYNCANDFILE":
+			MODE = SYNCANDFILE
 		default:
 			panic(fmt.Sprintf("Unknown SIMMODE: %v", mode))
 		}
@@ -95,7 +98,7 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 
 	iid := os.Getenv("IID")
 
-	if MODE == FILE {
+	if MODE == FILE || MODE == SYNCANDFILE {
 		c.mutex = &sync.RWMutex{}
 		c.msgCount = 0
 		c.bufferedData = make([][]byte, 0)
@@ -159,7 +162,7 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 		NetWrite(c.OutConn, marshalled_cluster_info)
 	}
 
-	if MODE == SYNC {
+	if MODE == SYNC || MODE == SYNCANDFILE {
 		c.mutex = &sync.RWMutex{}
 		c.cond = sync.NewCond(c.mutex)
 		c.doneIds = new(sync.Map)
@@ -190,7 +193,9 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 				ch.(chan bool) <- success
 			}
 		}()
-	} else if MODE == FILE {
+	}
+
+	if MODE == FILE || MODE == SYNCANDFILE {
 		c.reqBytesCh = make(chan []byte, 1024)
 		go func() {
 			writeToFile := func(f *os.File, reqBytes []byte) {
@@ -275,29 +280,29 @@ func (c *RPCConnection) ExtractReqId(reqbytes []byte) uint64 {
 func (c *RPCConnection) Request(reqbytes []byte) chan bool {
 	var ch chan bool = nil
 
-	if MODE != FILE {
-		if MODE == SYNC {
-			reqId := c.ExtractReqId(reqbytes)
-			ch = make(chan bool)
-			c.doneIds.Store(reqId, ch)
-		}
-
-		n, err := c.OutConn.Write(reqbytes)
-		if err != nil {
-			panic(fmt.Sprintf("Write to conn failed, err:%v\n", err))
-		}
-		if n != len(reqbytes) {
-			panic(fmt.Sprintf("Write to conn failed, n:%v, len(reqbytes):%v\n", n, len(reqbytes)))
-		}
-	} else {
+	if MODE == FILE || MODE == SYNCANDFILE {
 		// Let a goroutine to actually write to file.
 		c.reqBytesCh <- reqbytes
 	}
+
+	if MODE == SYNC || MODE == SYNCANDFILE {
+		reqId := c.ExtractReqId(reqbytes)
+		ch = make(chan bool)
+		c.doneIds.Store(reqId, ch)
+	}
+	n, err := c.OutConn.Write(reqbytes)
+	if err != nil {
+		panic(fmt.Sprintf("Write to conn failed, err:%v\n", err))
+	}
+	if n != len(reqbytes) {
+		panic(fmt.Sprintf("Write to conn failed, n:%v, len(reqbytes):%v\n", n, len(reqbytes)))
+	}
+
 	return ch
 }
 
 func (c *RPCConnection) WaitFor(reqId uint64, ch chan bool) {
-	if MODE == SYNC {
+	if MODE == SYNC || MODE == SYNCANDFILE {
 		success := <-ch
 		if !success {
 			panic(fmt.Sprintf("Request %v failed\n", reqId))

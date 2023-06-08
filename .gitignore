@@ -17,3 +17,4 @@ hack/tls-setup/certs
 /contrib/raftexample/raftexample-*
 
 *.bak
+.DS_Store
