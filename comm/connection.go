@@ -285,17 +285,19 @@ func (c *RPCConnection) Request(reqbytes []byte) chan bool {
 		c.reqBytesCh <- reqbytes
 	}
 
-	if MODE == SYNC || MODE == SYNCANDFILE {
-		reqId := c.ExtractReqId(reqbytes)
-		ch = make(chan bool)
-		c.doneIds.Store(reqId, ch)
-	}
-	n, err := c.OutConn.Write(reqbytes)
-	if err != nil {
-		panic(fmt.Sprintf("Write to conn failed, err:%v\n", err))
-	}
-	if n != len(reqbytes) {
-		panic(fmt.Sprintf("Write to conn failed, n:%v, len(reqbytes):%v\n", n, len(reqbytes)))
+	if MODE != FILE {
+		if MODE == SYNC || MODE == SYNCANDFILE {
+			reqId := c.ExtractReqId(reqbytes)
+			ch = make(chan bool)
+			c.doneIds.Store(reqId, ch)
+		}
+		n, err := c.OutConn.Write(reqbytes)
+		if err != nil {
+			panic(fmt.Sprintf("Write to conn failed, err:%v\n", err))
+		}
+		if n != len(reqbytes) {
+			panic(fmt.Sprintf("Write to conn failed, n:%v, len(reqbytes):%v\n", n, len(reqbytes)))
+		}
 	}
 
 	return ch
