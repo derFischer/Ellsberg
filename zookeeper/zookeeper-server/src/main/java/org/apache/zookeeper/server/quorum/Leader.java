@@ -522,6 +522,7 @@ public class Leader extends LearnerMaster {
 
                     BufferedInputStream is = new BufferedInputStream(socket.getInputStream());
                     LearnerHandler fh = new LearnerHandler(socket, is, Leader.this);
+                    fh.setSimConn(simConn);
                     fh.start();
                 } catch (SocketException e) {
                     error = true;
@@ -1138,6 +1139,8 @@ public class Leader extends LearnerMaster {
     void sendPacket(QuorumPacket qp) {
         synchronized (forwardingFollowers) {
             for (LearnerHandler f : forwardingFollowers) {
+                // sending() send PROPOSAL, COMMIT, COMMITANDACTIVATE
+                // simConn.request(new SimConn.SimConnMessage(null, qp));
                 f.queuePacket(qp);
             }
         }

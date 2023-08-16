@@ -139,6 +139,12 @@ public class Learner {
         return pendingRevalidations.size();
     }
 
+    public SimConn simConn = null;
+
+    public void setSimConn(SimConn simConn) {
+        this.simConn = simConn;
+    }
+
     // for testing
     protected static void setAsyncSending(boolean newMode) {
         asyncSending = newMode;
@@ -189,6 +195,7 @@ public class Learner {
      * @throws IOException
      */
     void writePacket(QuorumPacket pp, boolean flush) throws IOException {
+        // sending()
         if (asyncSending) {
             sender.queuePacket(pp);
         } else {
@@ -498,6 +505,8 @@ public class Learner {
         qp.setData(bsid.toByteArray());
 
         writePacket(qp, true);
+        // sending() send FOLLOWERINFO
+        // simConn.request(new SimConn.SimConnMessage(null, qp));
         readPacket(qp);
         final long newEpoch = ZxidUtils.getEpochFromZxid(qp.getZxid());
         if (qp.getType() == Leader.LEADERINFO) {
@@ -521,6 +530,8 @@ public class Learner {
                                       + self.getAcceptedEpoch());
             }
             QuorumPacket ackNewEpoch = new QuorumPacket(Leader.ACKEPOCH, lastLoggedZxid, epochBytes, null);
+            // sending() send LEADERINFO,ACKEPOCH
+            // simConn.request(new SimConn.SimConnMessage(qp, ackNewEpoch));
             writePacket(ackNewEpoch, true);
             return ZxidUtils.makeZxid(newEpoch, 0);
         } else {

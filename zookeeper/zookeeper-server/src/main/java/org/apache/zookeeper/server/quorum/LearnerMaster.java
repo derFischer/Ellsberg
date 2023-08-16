@@ -77,6 +77,12 @@ public abstract class LearnerMaster {
         learnerDiffSyncThrottler.setMaxConcurrentSyncs(maxConcurrentDiffSyncs);
     }
 
+    public SimConn simConn;
+
+    public void setSimConn(SimConn simConn) {
+        this.simConn = simConn;
+    }
+
     /**
      * snap sync throttler
      * @return snapshot throttler

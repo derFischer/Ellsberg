@@ -1334,17 +1334,24 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
     public Follower follower;
     public Leader leader;
     public Observer observer;
+    public SimConn simConn;
 
     protected Follower makeFollower(FileTxnSnapLog logFactory) throws IOException {
-        return new Follower(this, new FollowerZooKeeperServer(logFactory, this, this.zkDb));
+        Follower f = new Follower(this, new FollowerZooKeeperServer(logFactory, this, this.zkDb));
+        f.setSimConn(simConn);
+        return f;
     }
 
     protected Leader makeLeader(FileTxnSnapLog logFactory) throws IOException, X509Exception {
-        return new Leader(this, new LeaderZooKeeperServer(logFactory, this, this.zkDb));
+        Leader l = new Leader(this, new LeaderZooKeeperServer(logFactory, this, this.zkDb));
+        l.setSimConn(simConn);
+        return l;
     }
 
     protected Observer makeObserver(FileTxnSnapLog logFactory) throws IOException {
-        return new Observer(this, new ObserverZooKeeperServer(logFactory, this, this.zkDb));
+        Observer o = new Observer(this, new ObserverZooKeeperServer(logFactory, this, this.zkDb));
+        o.setSimConn(simConn);
+        return o;
     }
 
     @SuppressWarnings("deprecation")
@@ -1359,6 +1366,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
             throw new UnsupportedOperationException("Election Algorithm 2 is not supported.");
         case 3:
             QuorumCnxManager qcm = createCnxnManager();
+            qcm.simConn = simConn;
             QuorumCnxManager oldQcm = qcmRef.getAndSet(qcm);
             if (oldQcm != null) {
                 LOG.warn("Clobbering already-set QuorumCnxManager (restarting leader election?)");

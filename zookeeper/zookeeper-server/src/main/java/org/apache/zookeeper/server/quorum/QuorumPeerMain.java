@@ -226,6 +226,9 @@ public class QuorumPeerMain {
                 quorumPeer.setJvmPauseMonitor(new JvmPauseMonitor(config));
             }
 
+            quorumPeer.simConn = new SimConn();
+            quorumPeer.simConn.init(quorumPeer.getMyId());
+
             quorumPeer.start();
             ZKAuditProvider.addZKStartStopAuditLog();
             quorumPeer.join();

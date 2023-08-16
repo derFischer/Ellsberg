@@ -538,8 +538,12 @@ public class LearnerHandler extends ZooKeeperThread {
                 oa.writeRecord(newEpochPacket, "packet");
                 messageTracker.trackSent(Leader.LEADERINFO);
                 bufferedOutput.flush();
+                // sending() send LAEDERINFO (NEWEPOCH)  (also `learner info` as recv)
+                // simConn.request(new SimConn.SimConnMessage(qp, newEpochPacket));
                 QuorumPacket ackEpochPacket = new QuorumPacket();
                 ia.readRecord(ackEpochPacket, "packet");
+                // sending() recv ACK-E
+                // simConn.request(new SimConn.SimConnMessage(ackEpochPacket, null));
                 messageTracker.trackReceived(ackEpochPacket.getType());
                 if (ackEpochPacket.getType() != Leader.ACKEPOCH) {
                     LOG.error("{} is not ACKEPOCH", ackEpochPacket.toString());
@@ -602,6 +606,8 @@ public class LearnerHandler extends ZooKeeperThread {
                 oa.writeRecord(newLeaderQP, "packet");
             } else {
                 QuorumPacket newLeaderQP = new QuorumPacket(Leader.NEWLEADER, newLeaderZxid, learnerMaster.getQuorumVerifierBytes(), null);
+                // sending() send newleader
+                // simConn.request(new SimConn.SimConnMessage(null, newLeaderQP));
                 queuedPackets.add(newLeaderQP);
             }
             bufferedOutput.flush();
@@ -622,6 +628,8 @@ public class LearnerHandler extends ZooKeeperThread {
                 LOG.error("Next packet was supposed to be an ACK, but received packet: {}", packetToString(qp));
                 return;
             }
+            // sending() recv ACKLD
+            // simConn.request(new SimConn.SimConnMessage(qp, null));
 
             LOG.debug("Received NEWLEADER-ACK message from {}", sid);
 
@@ -650,12 +658,17 @@ public class LearnerHandler extends ZooKeeperThread {
             // using the data
             //
             LOG.debug("Sending UPTODATE message to {}", sid);
-            queuedPackets.add(new QuorumPacket(Leader.UPTODATE, -1, null, null));
+            QuorumPacket uptodate = new QuorumPacket(Leader.UPTODATE, -1, null, null);
+            // sending() send uptodate
+            // simConn.request(new SimConn.SimConnMessage(null, uptodate));
+            queuedPackets.add(uptodate);
 
             while (true) {
                 qp = new QuorumPacket();
                 ia.readRecord(qp, "packet");
                 messageTracker.trackReceived(qp.getType());
+                // sending() recv ack/ping/revalidate/request
+                // simConn.request(new SimConn.SimConnMessage(qp, null));
 
                 if (LOG.isTraceEnabled()) {
                     long traceMask = ZooTrace.SERVER_PACKET_TRACE_MASK;
@@ -1179,5 +1192,10 @@ public class LearnerHandler extends ZooKeeperThread {
         } catch (IOException e) {
             LOG.warn("Ignoring error closing connection to learner {}", getSid(), e);
         }
+    }
+
+    public SimConn simConn;
+    public void setSimConn(SimConn simConn) {
+        this.simConn = simConn;
     }
 }
