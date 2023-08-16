@@ -20,6 +20,7 @@ public class SimConn {
     public static class SimConnMessage implements Record {
         final static byte[] emptyByteArray = new byte[]{};
         boolean isSend;
+        long peerId;
         // not | qp
         String type;
         byte[] recv;
@@ -27,16 +28,18 @@ public class SimConn {
 
         protected static final Logger LOG = LoggerFactory.getLogger(SimConnMessage.class);
 
-        SimConnMessage(String type, byte[] recv, byte[] send) {
+        SimConnMessage(long peerId, String type, byte[] recv, byte[] send) {
             assert (recv != null || send != null);
             this.isSend = send != null;
+            this.peerId = peerId;
             this.type = type;
             this.recv = recv != null ? recv : emptyByteArray;
             this.send = send != null ? send : emptyByteArray;
         }
-        SimConnMessage(QuorumPacket recv, QuorumPacket send) {
+        SimConnMessage(long peerId, QuorumPacket recv, QuorumPacket send) {
             assert (recv != null || send != null);
             this.isSend = send != null;
+            this.peerId = peerId;
             if (recv == null && send != null) {
                 this.type = Leader.getPacketType(send.getType());
             } else if (recv != null && send == null) {
@@ -73,6 +76,7 @@ public class SimConn {
         public void serialize(OutputArchive a_, String tag) throws java.io.IOException {
             a_.startRecord(this,tag);
             a_.writeBool(isSend, "isSend");
+            a_.writeLong(peerId, "peerId");
             a_.writeString(type, "type");
             a_.writeBuffer(recv, "recv");
             a_.writeBuffer(send, "send");
@@ -85,7 +89,7 @@ public class SimConn {
         }
 
         public long length() {
-            return 1 + (4+type.length()) + (4+recv.length) + (4+send.length);
+            return 1 + 8 + (4+type.length()) + (4+recv.length) + (4+send.length);
         }
 
         public String toString() {

@@ -1232,7 +1232,7 @@ public class QuorumCnxManager {
                 return;
             }
             // sending(): send fle notification
-            simConn.request(new SimConn.SimConnMessage("not", null, msgBytes));
+            simConn.request(new SimConn.SimConnMessage(sid, "not", null, msgBytes));
             dout.writeInt(b.capacity());
             dout.write(b.array());
             dout.flush();
@@ -1399,7 +1399,7 @@ public class QuorumCnxManager {
                     final byte[] msgArray = new byte[length];
                     din.readFully(msgArray, 0, length);
                     // sending(): recv fle notification
-                    simConn.request(new SimConn.SimConnMessage("not", msgArray, null));
+                    simConn.request(new SimConn.SimConnMessage(sid, "not", msgArray, null));
                     addToRecvQueue(new Message(ByteBuffer.wrap(msgArray), sid));
                 }
             } catch (Exception e) {
