@@ -1,20 +1,22 @@
-package org.apache.zookeeper.server.quorum;
+package org.apache.zookeeper.server;
 
 import org.apache.jute.*;
 import org.apache.jute.Record;
+import org.apache.zookeeper.proto.ReplyHeader;
+import org.apache.zookeeper.proto.RequestHeader;
+import org.apache.zookeeper.server.quorum.Leader;
+import org.apache.zookeeper.server.quorum.QuorumPacket;
+import org.apache.zookeeper.txn.TxnHeader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
-import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.locks.ReentrantLock;
-
-import static java.nio.charset.StandardCharsets.UTF_8;
 
 public class SimConn {
     public static class SimConnMessage implements Record {
@@ -28,7 +30,28 @@ public class SimConn {
 
         protected static final Logger LOG = LoggerFactory.getLogger(SimConnMessage.class);
 
-        SimConnMessage(long peerId, String type, byte[] recv, byte[] send) {
+        static public SimConnMessage createForClientReq(long peerId, TxnHeader hdr) {
+            SimConnMessage m = new SimConnMessage();
+            m.isSend = false;
+            m.peerId = peerId;
+            m.type = "CLIENTREQ";
+            m.send = emptyByteArray;
+            m.recv = m.quorumPacketToBytes(hdr);
+            return m;
+        }
+        static public SimConnMessage createForClientResp(long peerId, TxnHeader hdr) {
+            SimConnMessage m = new SimConnMessage();
+            m.isSend = true;
+            m.peerId = peerId;
+            m.type = "CLIENTRESP";
+            m.send = m.quorumPacketToBytes(hdr);
+            m.recv = emptyByteArray;
+            return m;
+        }
+
+        public SimConnMessage() {}
+
+        public SimConnMessage(long peerId, String type, byte[] recv, byte[] send) {
             assert (recv != null || send != null);
             this.isSend = send != null;
             this.peerId = peerId;
@@ -36,7 +59,27 @@ public class SimConn {
             this.recv = recv != null ? recv : emptyByteArray;
             this.send = send != null ? send : emptyByteArray;
         }
-        SimConnMessage(long peerId, QuorumPacket recv, QuorumPacket send) {
+
+        byte[] quorumPacketToBytes(Record qp) {
+            ByteArrayOutputStream s = new ByteArrayOutputStream();
+            try {
+                if (qp != null) {
+                    DataOutputStream ds = new DataOutputStream(s);
+                    BinaryOutputArchive outputArchive = new BinaryOutputArchive(ds);
+                    qp.serialize(outputArchive, "qp");
+                    ds.flush();
+                    return s.toByteArray();
+                } else {
+                    return emptyByteArray;
+                }
+            } catch (java.io.IOException e) {
+                LOG.error(e.toString());
+                System.exit(1);
+            }
+            return emptyByteArray;
+        }
+
+        public SimConnMessage(long peerId, QuorumPacket recv, QuorumPacket send) {
             assert (recv != null || send != null);
             this.isSend = send != null;
             this.peerId = peerId;
@@ -48,29 +91,8 @@ public class SimConn {
                 this.type = Leader.getPacketType(recv.getType()) + "," + Leader.getPacketType(send.getType());
             }
             ByteArrayOutputStream s = new ByteArrayOutputStream();
-            try {
-                if (recv != null) {
-                    DataOutputStream ds = new DataOutputStream(s);
-                    BinaryOutputArchive outputArchive = new BinaryOutputArchive(ds);
-                    recv.serialize(outputArchive, "qp");
-                    ds.flush();
-                    this.recv = s.toByteArray();
-                } else {
-                    this.recv = emptyByteArray;
-                }
-                if (send != null) {
-                    s.reset();
-                    DataOutputStream ds = new DataOutputStream(s);
-                    BinaryOutputArchive outputArchive = new BinaryOutputArchive(ds);
-                    send.serialize(outputArchive, "qp");
-                    this.send = s.toByteArray();
-                } else {
-                    this.send = emptyByteArray;
-                }
-            } catch (java.io.IOException e) {
-                LOG.error(e.toString());
-                System.exit(1);
-            }
+            this.recv = quorumPacketToBytes(recv);
+            this.send = quorumPacketToBytes(send);
         }
 
         public void serialize(OutputArchive a_, String tag) throws java.io.IOException {
@@ -169,7 +191,7 @@ public class SimConn {
 
     private AsyncSender asyncSender;
 
-    SimConn() {
+    public SimConn() {
         this.lock = new ReentrantLock();
     }
 
@@ -255,7 +277,7 @@ public class SimConn {
     public void print(String who, QuorumPacket qp) {
         if (mode != MODE.NONE) {
             try {
-                if (qp.getType() != Leader.PING) {
+                if (!Leader.getPacketType(qp.getType()).equals("PING")) {
                     LOG.info(who + qp);
                 }
             } catch(Exception e) {
@@ -268,7 +290,7 @@ public class SimConn {
 
     public void request(QuorumPacket qp) {
         if (mode != MODE.NONE) {
-            if (qp.getType() != Leader.PING) {
+            if (!Leader.getPacketType(qp.getType()).equals("PING")) {
                 LOG.info("[writePacket] " + qp);
             }
         }

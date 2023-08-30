@@ -64,6 +64,7 @@ import org.apache.zookeeper.jmx.ZKMBeanInfo;
 import org.apache.zookeeper.server.ServerCnxn;
 import org.apache.zookeeper.server.ServerCnxnFactory;
 import org.apache.zookeeper.server.ServerMetrics;
+import org.apache.zookeeper.server.SimConn;
 import org.apache.zookeeper.server.ZKDatabase;
 import org.apache.zookeeper.server.ZooKeeperServer;
 import org.apache.zookeeper.server.ZooKeeperThread;
@@ -1339,18 +1340,21 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
     protected Follower makeFollower(FileTxnSnapLog logFactory) throws IOException {
         Follower f = new Follower(this, new FollowerZooKeeperServer(logFactory, this, this.zkDb));
         f.setSimConn(simConn);
+        f.zk.simConn = simConn;
         return f;
     }
 
     protected Leader makeLeader(FileTxnSnapLog logFactory) throws IOException, X509Exception {
         Leader l = new Leader(this, new LeaderZooKeeperServer(logFactory, this, this.zkDb));
         l.setSimConn(simConn);
+        l.zk.simConn = simConn;
         return l;
     }
 
     protected Observer makeObserver(FileTxnSnapLog logFactory) throws IOException {
         Observer o = new Observer(this, new ObserverZooKeeperServer(logFactory, this, this.zkDb));
         o.setSimConn(simConn);
+        o.zk.simConn = simConn;
         return o;
     }
 

@@ -1762,6 +1762,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
                 }
                 si.setOwner(ServerCnxn.me);
                 submitRequest(si);
+                // sending() receive a Request from client
             }
         }
     }
@@ -2414,5 +2415,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
         }
         ServerMetrics.getMetrics().QUOTA_EXCEEDED_ERROR_PER_NAMESPACE.add(namespace, 1);
     }
+
+    public SimConn simConn;
 }
 

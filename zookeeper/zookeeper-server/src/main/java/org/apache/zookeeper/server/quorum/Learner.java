@@ -50,12 +50,7 @@ import org.apache.jute.Record;
 import org.apache.zookeeper.ZooDefs.OpCode;
 import org.apache.zookeeper.common.Time;
 import org.apache.zookeeper.common.X509Exception;
-import org.apache.zookeeper.server.ExitCode;
-import org.apache.zookeeper.server.Request;
-import org.apache.zookeeper.server.ServerCnxn;
-import org.apache.zookeeper.server.ServerMetrics;
-import org.apache.zookeeper.server.TxnLogEntry;
-import org.apache.zookeeper.server.ZooTrace;
+import org.apache.zookeeper.server.*;
 import org.apache.zookeeper.server.quorum.QuorumPeer.QuorumServer;
 import org.apache.zookeeper.server.quorum.flexible.QuorumVerifier;
 import org.apache.zookeeper.server.util.ConfigUtils;
@@ -506,7 +501,7 @@ public class Learner {
 
         writePacket(qp, true);
         // sending() send FOLLOWERINFO
-        // simConn.request(new SimConn.SimConnMessage(null, qp));
+        simConn.request(new SimConn.SimConnMessage(self.getMyId(), null, qp));
         readPacket(qp);
         final long newEpoch = ZxidUtils.getEpochFromZxid(qp.getZxid());
         if (qp.getType() == Leader.LEADERINFO) {
@@ -531,7 +526,7 @@ public class Learner {
             }
             QuorumPacket ackNewEpoch = new QuorumPacket(Leader.ACKEPOCH, lastLoggedZxid, epochBytes, null);
             // sending() send LEADERINFO,ACKEPOCH
-            // simConn.request(new SimConn.SimConnMessage(qp, ackNewEpoch));
+            simConn.request(new SimConn.SimConnMessage(self.getMyId(), qp, ackNewEpoch));
             writePacket(ackNewEpoch, true);
             return ZxidUtils.makeZxid(newEpoch, 0);
         } else {
@@ -773,7 +768,10 @@ public class Learner {
                         packetsNotCommitted.clear();
                     }
 
-                    writePacket(new QuorumPacket(Leader.ACK, newLeaderZxid, null, null), true);
+                    QuorumPacket ackld = new QuorumPacket(Leader.ACK, newLeaderZxid, null, null);
+                    writePacket(ackld, true);
+                    // sending() follower reply NEWLEADER with ACKLD
+                    simConn.request(new SimConn.SimConnMessage(self.getMyId(), qp, ackld));
                     break;
                 }
             }

@@ -155,6 +155,14 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements Req
 
                 request.prepStartTime = Time.currentElapsedTime();
                 pRequest(request);
+                // sending() receive a Request from client
+                switch (request.type) {
+                case OpCode.create:
+                case OpCode.setData:
+                case OpCode.getData:
+                    TxnHeader fakeHeader = new TxnHeader(request.sessionId, request.cxid, 0, 0, 0);
+                    this.zks.simConn.request(SimConn.SimConnMessage.createForClientReq(request.sessionId, fakeHeader));
+                }
             }
         } catch (Exception e) {
             handleException(this.getName(), e);

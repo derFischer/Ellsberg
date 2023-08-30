@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.net.Socket;
 import java.net.SocketAddress;
 import org.apache.zookeeper.server.Request;
+import org.apache.zookeeper.server.SimConn;
 import org.apache.zookeeper.server.ZKDatabase;
 import org.apache.zookeeper.server.quorum.auth.QuorumAuthServer;
 import org.slf4j.Logger;

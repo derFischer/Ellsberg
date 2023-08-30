@@ -82,6 +82,7 @@ import org.apache.zookeeper.server.quorum.QuorumZooKeeperServer;
 import org.apache.zookeeper.server.util.AuthUtil;
 import org.apache.zookeeper.server.util.RequestPathMetricsCollector;
 import org.apache.zookeeper.txn.ErrorTxn;
+import org.apache.zookeeper.txn.TxnHeader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -583,6 +584,16 @@ public class FinalRequestProcessor implements RequestProcessor {
         try {
             if (path == null || rsp == null) {
                 responseSize = cnxn.sendResponse(hdr, rsp, "response");
+                // Create, Set will get here
+                // sending() reply to client (write)
+                LOG.info("\033[1;31m 111111111111: zxid={}, sessionid={}, cxid={}, lastzxid={}\033[0m", request.zxid, request.sessionId, hdr.getXid(), hdr.getZxid());
+                switch (request.type) {
+                    case OpCode.create:
+                    case OpCode.setData:
+                    case OpCode.getData:
+                        TxnHeader fakeHeader = new TxnHeader(request.sessionId, request.cxid, 0, 0, 0);
+                        this.zks.simConn.request(SimConn.SimConnMessage.createForClientReq(request.sessionId, fakeHeader));
+                }
             } else {
                 int opCode = request.type;
                 Stat stat = null;
@@ -594,15 +605,20 @@ public class FinalRequestProcessor implements RequestProcessor {
                         GetDataResponse getDataResponse = (GetDataResponse) rsp;
                         stat = getDataResponse.getStat();
                         responseSize = cnxn.sendResponse(hdr, rsp, "response", path, stat, opCode);
+                        LOG.info("\033[1;31m 222222222222: zxid={}, sessionid={}, cxid={}, lastzxid={}\033[0m", request.zxid, request.sessionId, hdr.getXid(), hdr.getZxid());
+                        // Get will get here
+                        // sending() reply to client (read)
                         break;
                     }
                     case OpCode.getChildren2 : {
                         GetChildren2Response getChildren2Response = (GetChildren2Response) rsp;
                         stat = getChildren2Response.getStat();
                         responseSize = cnxn.sendResponse(hdr, rsp, "response", path, stat, opCode);
+                        LOG.info("\033[1;31m 3333333333333\033[0m");
                         break;
                     }
                     default:
+                        LOG.info("\033[1;31m 444444444444\033[0m");
                         responseSize = cnxn.sendResponse(hdr, rsp, "response");
                 }
             }

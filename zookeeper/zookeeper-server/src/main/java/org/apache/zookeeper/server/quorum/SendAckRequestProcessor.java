@@ -24,6 +24,7 @@ import org.apache.zookeeper.ZooDefs.OpCode;
 import org.apache.zookeeper.server.Request;
 import org.apache.zookeeper.server.RequestProcessor;
 import org.apache.zookeeper.server.ServerMetrics;
+import org.apache.zookeeper.server.SimConn;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,6 +45,10 @@ public class SendAckRequestProcessor implements RequestProcessor, Flushable {
                 si.logLatency(ServerMetrics.getMetrics().PROPOSAL_ACK_CREATION_LATENCY);
 
                 learner.writePacket(qp, false);
+                // sending() reply PROPOSAL with ACK
+                // TODO: this is a big hack...
+                QuorumPacket proposalQp = new QuorumPacket(Leader.PROPOSAL, si.getHdr().getZxid(), si.getSerializeData(), null);
+                learner.simConn.request(new SimConn.SimConnMessage(learner.findLeader().getId(), proposalQp, qp));
             } catch (IOException e) {
                 LOG.warn("Closing connection to leader, exception during packet send", e);
                 try {

@@ -57,14 +57,7 @@ import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.ZooDefs.OpCode;
 import org.apache.zookeeper.common.Time;
 import org.apache.zookeeper.jmx.MBeanRegistry;
-import org.apache.zookeeper.server.ExitCode;
-import org.apache.zookeeper.server.FinalRequestProcessor;
-import org.apache.zookeeper.server.Request;
-import org.apache.zookeeper.server.RequestProcessor;
-import org.apache.zookeeper.server.ServerMetrics;
-import org.apache.zookeeper.server.ZKDatabase;
-import org.apache.zookeeper.server.ZooKeeperCriticalThread;
-import org.apache.zookeeper.server.ZooTrace;
+import org.apache.zookeeper.server.*;
 import org.apache.zookeeper.server.quorum.QuorumPeer.LearnerType;
 import org.apache.zookeeper.server.quorum.auth.QuorumAuthServer;
 import org.apache.zookeeper.server.quorum.flexible.QuorumVerifier;
@@ -1139,8 +1132,8 @@ public class Leader extends LearnerMaster {
     void sendPacket(QuorumPacket qp) {
         synchronized (forwardingFollowers) {
             for (LearnerHandler f : forwardingFollowers) {
-                // sending() send PROPOSAL, COMMIT, COMMITANDACTIVATE
-                // simConn.request(new SimConn.SimConnMessage(null, qp));
+                // sending() leader sends PROPOSAL, COMMIT, COMMITANDACTIVATE
+                simConn.request(new SimConn.SimConnMessage(f.getSid(), null, qp));
                 f.queuePacket(qp);
             }
         }

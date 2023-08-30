@@ -29,6 +29,7 @@ import org.apache.zookeeper.ZooDefs.OpCode;
 import org.apache.zookeeper.common.Time;
 import org.apache.zookeeper.server.Request;
 import org.apache.zookeeper.server.ServerMetrics;
+import org.apache.zookeeper.server.SimConn;
 import org.apache.zookeeper.server.TxnLogEntry;
 import org.apache.zookeeper.server.quorum.QuorumPeer.QuorumServer;
 import org.apache.zookeeper.server.quorum.flexible.QuorumVerifier;
@@ -122,6 +123,7 @@ public class Follower extends Learner {
                 QuorumPacket qp = new QuorumPacket();
                 while (this.isRunning()) {
                     readPacket(qp);
+                    // sending() Follower received a package.
                     processPacket(qp);
                 }
             } catch (Exception e) {
@@ -199,6 +201,8 @@ public class Follower extends Learner {
             }
             break;
         case Leader.COMMIT:
+            // sending() received COMMIT
+            simConn.request(new SimConn.SimConnMessage(self.getMyId(), qp, null));
             ServerMetrics.getMetrics().LEARNER_COMMIT_RECEIVED_COUNT.add(1);
             fzk.commit(qp.getZxid());
             if (om != null) {
