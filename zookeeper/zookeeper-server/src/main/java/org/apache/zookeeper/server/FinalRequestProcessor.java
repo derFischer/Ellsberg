@@ -594,6 +594,7 @@ public class FinalRequestProcessor implements RequestProcessor {
                     case OpCode.getData:
                         TxnHeader fakeHeader = new TxnHeader(request.sessionId, request.cxid, 0, 0, 0);
                         this.zks.simConn.request(SimConn.SimConnMessage.createForClientResp(request.sessionId, fakeHeader));
+                        break;
                 }
             } else {
                 int opCode = request.type;

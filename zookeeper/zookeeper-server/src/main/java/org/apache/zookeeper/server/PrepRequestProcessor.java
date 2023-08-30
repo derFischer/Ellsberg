@@ -148,8 +148,7 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements Req
                     case OpCode.getData:
                         TxnHeader fakeHeader = new TxnHeader(request.sessionId, request.cxid, 0, 0, 0);
                         this.zks.simConn.request(SimConn.SimConnMessage.createForClientReq(request.sessionId, fakeHeader));
-                    default:
-                        LOG.info("\033[1;31mOpCode={}\033[0m", request.type);
+                        break;
                 }
                 ServerMetrics.getMetrics().PREP_PROCESSOR_QUEUE_TIME
                     .add(Time.currentElapsedTime() - request.prepQueueStartTime);

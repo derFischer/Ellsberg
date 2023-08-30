@@ -12,10 +12,13 @@ import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.locks.ReentrantLock;
@@ -30,7 +33,15 @@ public class SimConn {
         byte[] recv;
         byte[] send;
 
+        boolean isTimeoutForFile = false;
+
         protected static final Logger LOG = LoggerFactory.getLogger(SimConnMessage.class);
+
+        static final SimConnMessage TimeoutForFile = new SimConnMessage(true);
+
+        public SimConnMessage(boolean isTimeoutForFile) {
+            this.isTimeoutForFile = isTimeoutForFile;
+        }
 
         static public SimConnMessage createForClientReq(long peerId, TxnHeader hdr) {
             SimConnMessage m = new SimConnMessage();
@@ -168,17 +179,25 @@ public class SimConn {
 
     public static class AsyncSender extends Thread {
         // Note that BlockingQueue is thread-safe, we don't need additional lock.
-        private final BlockingQueue<SimConnMessage> sendQueue;
-        final private OutputStream outConn;
-        final private OutputArchive outArchive;
+        protected final BlockingQueue<SimConnMessage> sendQueue;
+        protected OutputStream outConn;
+        protected OutputArchive outArchive;
 
+        AsyncSender() {
+            this.sendQueue = new LinkedBlockingQueue<>();
+        }
         /*
          * Note that the `outConn` could even be a file stream
          */
         AsyncSender(OutputStream outConn) {
+            this();
+            this.outConn = outConn;
+            updateOutArchive(outConn);
+        }
+
+        public void updateOutArchive(OutputStream outConn) {
             this.outConn = outConn;
             this.outArchive = BinaryOutputArchive.getArchive(outConn);
-            this.sendQueue = new LinkedBlockingQueue<>();
         }
 
         public void run() {
@@ -205,10 +224,73 @@ public class SimConn {
         }
     }
 
+    public static class AsyncFileWriter extends AsyncSender {
+        public long iid;
+        public String logDir;
+        final static private DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+        AsyncFileWriter(long iid) {
+            super();
+            this.iid = iid;
+            String formateTime = dateFormatter.format(ZonedDateTime.now());
+            this.logDir = "/mydata/log" + formateTime;
+            new File(logDir).mkdirs();
+            changeFile();
+        }
+
+        public void changeFile() {
+            String formateTime = dateFormatter.format(ZonedDateTime.now());
+            Path path = Paths.get(this.logDir, String.format("message.%s.%s.data", iid, formateTime));
+            try {
+                outConn = Files.newOutputStream(path);
+            } catch (IOException e) {
+                LOG.info(e.toString());
+                System.exit(1);
+            }
+            updateOutArchive(outConn);
+            LOG.info("use next filepath: {}", path);
+        }
+
+
+        @Override
+        public void run() {
+            Runnable putTimeout = () -> this.Put(SimConnMessage.TimeoutForFile);
+            TimerTask timeoutTask = new TimerTask() {
+                public void run() {
+                    putTimeout.run();
+                }
+            };
+
+            Timer timer = new Timer();
+            timer.schedule(timeoutTask, 60*1000L);
+            while (true) {
+                try {
+                    SimConnMessage m = sendQueue.take();
+                    LOG.info("here");
+                    if (m.isTimeoutForFile) {
+                        changeFile();
+                        timer = new Timer();
+                        timer.schedule(new TimerTask() {
+                                public void run() {
+                                    putTimeout.run();
+                                }
+                            },
+                            60*1000L
+                        );
+                        continue;
+                    }
+                    outArchive.writeLong(m.length(), "length");
+                    m.serialize(outArchive, "packet");
+                    outConn.flush();
+                } catch (java.io.IOException | InterruptedException e) {
+                    LOG.error(e.toString());
+                    System.exit(1);
+                }
+            }
+        }
+    }
+
     private AsyncSender asyncSender;
     public long msgCount;
-    final private DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
-    private String logDir;
 
     public SimConn() {
         this.lock = new ReentrantLock();
@@ -258,17 +340,8 @@ public class SimConn {
             return;
         }
 
-        if (mode == MODE.FILE) {
-            LOG.error("FILE mode is not implemented now.");
-            msgCount = 0;
-            String formatTime = dateFormatter.format(ZonedDateTime.now());
-            logDir = "/mydata/log" + formatTime;
-            new File(logDir).mkdirs();
-
-            System.exit(1);
-        } else {
+        if (mode != MODE.FILE) {
             if (conntype == CONNTYPE.PIPE) {
-                // TODO: uncomment
                 String stocPath = "/tmp/tmpPipe_s_to_c." + iid + ".pipe";
                 String ctosPath = "/tmp/tmpPipe_c_to_s." + iid + ".pipe";
                 try {
@@ -287,37 +360,21 @@ public class SimConn {
         }
 
         // TODO: implement for SYNC and FILE
-        if (this.mode == MODE.ASYNC) {
+        switch (this.mode) {
+        case ASYNC:
             asyncSender = new AsyncSender(outConn);
             asyncSender.start();
-        }
-    }
-
-    public void print(String who, QuorumPacket qp) {
-        if (mode != MODE.NONE) {
-            try {
-                if (!Leader.getPacketType(qp.getType()).equals("PING")) {
-                    LOG.info(who + qp);
-                }
-            } catch(Exception e) {
-                // catch any bug inside SimConn...
-                LOG.error(e.toString());
-                System.exit(1);
-            }
-        }
-    }
-
-    public void request(QuorumPacket qp) {
-        if (mode != MODE.NONE) {
-            if (!Leader.getPacketType(qp.getType()).equals("PING")) {
-                LOG.info("[writePacket] " + qp);
-            }
+            break;
+        case FILE:
+            asyncSender = new AsyncFileWriter(iid);
+            asyncSender.start();
+            break;
         }
     }
 
     public void request(SimConnMessage m) {
         if (mode != MODE.NONE) {
-            if (mode == MODE.ASYNC) {
+            if (mode == MODE.ASYNC || mode == MODE.FILE) {
                 try {
                     lock.lock();
                     asyncSender.Put(m);
@@ -328,40 +385,3 @@ public class SimConn {
         }
     }
 }
-
-
-
-// ByteBuffer buffer = ByteBuffer.wrap(m.msgBytes);
-// buffer.clear();
-//
-// int rstate = buffer.getInt();
-// long rleader = buffer.getLong();
-// long rzxid = buffer.getLong();
-// long relectionEpoch = buffer.getLong();
-// long rpeerepoch = buffer.getLong();
-// int version = buffer.getInt();
-//
-// // State of peer that sent this message
-// QuorumPeer.ServerState ackstate = QuorumPeer.ServerState.LOOKING;
-// switch (rstate) {
-//     case 0:
-//         ackstate = QuorumPeer.ServerState.LOOKING;
-//         break;
-//     case 1:
-//         ackstate = QuorumPeer.ServerState.FOLLOWING;
-//         break;
-//     case 2:
-//         ackstate = QuorumPeer.ServerState.LEADING;
-//         break;
-//     case 3:
-//         ackstate = QuorumPeer.ServerState.OBSERVING;
-//         break;
-//     default:
-//         System.exit(1);
-// }
-// int configLength = buffer.getInt();
-// byte[] b = new byte[configLength];
-// buffer.get(b);
-// String config = new String(b, UTF_8);
-//
-// LOG.info("[fle] leader={}, zxid={}, electionEpoch={}, state={}, sid={}, peerEpoch={}, version={}, config={}", rleader, rzxid, relectionEpoch, ackstate, -1, rpeerepoch, version, config);
