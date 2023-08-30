@@ -588,6 +588,7 @@ public class FinalRequestProcessor implements RequestProcessor {
                 // sending() reply to client (write)
                 LOG.info("\033[1;31m 111111111111: zxid={}, sessionid={}, cxid={}, lastzxid={}\033[0m", request.zxid, request.sessionId, hdr.getXid(), hdr.getZxid());
                 switch (request.type) {
+                    case OpCode.createSession:
                     case OpCode.create:
                     case OpCode.setData:
                     case OpCode.getData:
