@@ -771,7 +771,7 @@ public class Learner {
                     QuorumPacket ackld = new QuorumPacket(Leader.ACK, newLeaderZxid, null, null);
                     writePacket(ackld, true);
                     // sending() follower reply NEWLEADER with ACKLD
-                    simConn.request(new SimConn.SimConnMessage(self.getMyId(), qp, ackld));
+                    // simConn.request(new SimConn.SimConnMessage(self.getMyId(), qp, ackld));
                     break;
                 }
             }

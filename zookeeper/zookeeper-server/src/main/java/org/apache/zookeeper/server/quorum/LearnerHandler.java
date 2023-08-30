@@ -623,7 +623,7 @@ public class LearnerHandler extends ZooKeeperThread {
                 return;
             }
             // sending() recv ACKLD
-            simConn.request(new SimConn.SimConnMessage(getSid(), qp, null));
+            // simConn.request(new SimConn.SimConnMessage(getSid(), qp, null));
 
             LOG.debug("Received NEWLEADER-ACK message from {}", sid);
 
@@ -662,7 +662,7 @@ public class LearnerHandler extends ZooKeeperThread {
                 ia.readRecord(qp, "packet");
                 messageTracker.trackReceived(qp.getType());
                 // sending() recv ack/ping/revalidate/request
-                simConn.request(new SimConn.SimConnMessage(getSid(), qp, null));
+                simConn.request(new SimConn.SimConnMessage(getSid(), "ack", qp, null));
 
                 if (LOG.isTraceEnabled()) {
                     long traceMask = ZooTrace.SERVER_PACKET_TRACE_MASK;

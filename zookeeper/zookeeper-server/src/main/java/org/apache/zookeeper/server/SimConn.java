@@ -13,6 +13,8 @@ import org.slf4j.LoggerFactory;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -77,6 +79,16 @@ public class SimConn {
                 System.exit(1);
             }
             return emptyByteArray;
+        }
+
+        public SimConnMessage(long peerId, String type, QuorumPacket recv, QuorumPacket send) {
+            assert (recv != null || send != null);
+            this.isSend = send != null;
+            this.peerId = peerId;
+            this.type = type;
+            ByteArrayOutputStream s = new ByteArrayOutputStream();
+            this.recv = quorumPacketToBytes(recv);
+            this.send = quorumPacketToBytes(send);
         }
 
         public SimConnMessage(long peerId, QuorumPacket recv, QuorumPacket send) {
@@ -159,6 +171,10 @@ public class SimConn {
         private final BlockingQueue<SimConnMessage> sendQueue;
         final private OutputStream outConn;
         final private OutputArchive outArchive;
+
+        /*
+         * Note that the `outConn` could even be a file stream
+         */
         AsyncSender(OutputStream outConn) {
             this.outConn = outConn;
             this.outArchive = BinaryOutputArchive.getArchive(outConn);
@@ -190,6 +206,9 @@ public class SimConn {
     }
 
     private AsyncSender asyncSender;
+    public long msgCount;
+    final private DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+    private String logDir;
 
     public SimConn() {
         this.lock = new ReentrantLock();
@@ -226,12 +245,7 @@ public class SimConn {
         }
 
         if (this.mode != MODE.NONE) {
-            try {
-                this.iid = Long.parseLong(System.getenv("IID"));
-            } catch (NullPointerException e) {
-                LOG.error("IID is not set");
-                System.exit(1);
-            }
+            this.iid = Long.parseLong(System.getenv("IID"));
         }
     }
 
@@ -246,6 +260,11 @@ public class SimConn {
 
         if (mode == MODE.FILE) {
             LOG.error("FILE mode is not implemented now.");
+            msgCount = 0;
+            String formatTime = dateFormatter.format(ZonedDateTime.now());
+            logDir = "/mydata/log" + formatTime;
+            new File(logDir).mkdirs();
+
             System.exit(1);
         } else {
             if (conntype == CONNTYPE.PIPE) {
