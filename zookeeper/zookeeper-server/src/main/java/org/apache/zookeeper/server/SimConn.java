@@ -265,7 +265,6 @@ public class SimConn {
             while (true) {
                 try {
                     SimConnMessage m = sendQueue.take();
-                    LOG.info("here");
                     if (m.isTimeoutForFile) {
                         changeFile();
                         timer = new Timer();

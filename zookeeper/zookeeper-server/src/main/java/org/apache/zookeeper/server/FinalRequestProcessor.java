@@ -586,7 +586,6 @@ public class FinalRequestProcessor implements RequestProcessor {
                 responseSize = cnxn.sendResponse(hdr, rsp, "response");
                 // Create, Set will get here
                 // sending() reply to client (write)
-                LOG.info("\033[1;31m 111111111111: zxid={}, sessionid={}, cxid={}, lastzxid={}\033[0m", request.zxid, request.sessionId, hdr.getXid(), hdr.getZxid());
                 switch (request.type) {
                     case OpCode.createSession:
                     case OpCode.create:
@@ -607,7 +606,6 @@ public class FinalRequestProcessor implements RequestProcessor {
                         GetDataResponse getDataResponse = (GetDataResponse) rsp;
                         stat = getDataResponse.getStat();
                         responseSize = cnxn.sendResponse(hdr, rsp, "response", path, stat, opCode);
-                        LOG.info("\033[1;31m 222222222222: zxid={}, sessionid={}, cxid={}, lastzxid={}\033[0m", request.zxid, request.sessionId, hdr.getXid(), hdr.getZxid());
                         // Get will get here
                         // sending() reply to client (read)
                         break;
