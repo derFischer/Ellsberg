@@ -588,12 +588,13 @@ public class FinalRequestProcessor implements RequestProcessor {
                 // sending() reply to client (write)
                 switch (request.type) {
                     case OpCode.createSession:
+                    case OpCode.closeSession:
                     case OpCode.create:
                     case OpCode.setData:
-                    case OpCode.getData:
                         TxnHeader fakeHeader = new TxnHeader(request.sessionId, request.cxid, 0, 0, 0);
                         this.zks.simConn.request(SimConn.SimConnMessage.createForClientResp(request.sessionId, fakeHeader));
                         break;
+                    // case OpCode.getData:
                 }
             } else {
                 int opCode = request.type;

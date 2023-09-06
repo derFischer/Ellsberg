@@ -25,6 +25,9 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public class SimConn {
     public static class SimConnMessage implements Record {
+
+        protected static final Logger LOG = LoggerFactory.getLogger(SimConnMessage.class);
+        final static SimConnMessage TimeoutForFile = new SimConnMessage(true);
         final static byte[] emptyByteArray = new byte[]{};
         boolean isSend;
         long peerId;
@@ -34,10 +37,6 @@ public class SimConn {
         byte[] send;
 
         boolean isTimeoutForFile = false;
-
-        protected static final Logger LOG = LoggerFactory.getLogger(SimConnMessage.class);
-
-        static final SimConnMessage TimeoutForFile = new SimConnMessage(true);
 
         public SimConnMessage(boolean isTimeoutForFile) {
             this.isTimeoutForFile = isTimeoutForFile;
@@ -171,6 +170,7 @@ public class SimConn {
         protected final LinkedBlockingQueue<SimConnMessage> sendQueue;
         protected OutputStream outConn;
         protected OutputArchive outArchive;
+        public long msgCount;
 
         AsyncSender() {
             this.sendQueue = new LinkedBlockingQueue<>(4096);
@@ -210,14 +210,22 @@ public class SimConn {
                 System.exit(1);
             }
         }
+
+        public void writeOne(SimConnMessage m) {
+            msgCount++;
+            try {
+                outArchive.writeLong(m.length(), "length");
+                m.serialize(outArchive, "packet");
+            } catch (IOException e) {
+                LOG.error(e.toString());
+            }
+        }
     }
 
     public static class AsyncFileWriter extends AsyncSender {
         public long iid;
         public String logDir;
         public Path metaFilePath;
-
-        public long msgCount;
 
         final static private DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
         AsyncFileWriter(long iid) {
@@ -242,7 +250,6 @@ public class SimConn {
             updateOutArchive(outConn);
             LOG.info("use next filepath: {}", path);
         }
-
 
         @Override
         public void run() {
@@ -375,9 +382,13 @@ public class SimConn {
     public void request(SimConnMessage m) {
         if (mode != MODE.NONE) {
             if (mode == MODE.ASYNC || mode == MODE.FILE) {
-                // if (!m.type.equals("PING")) {
-                    asyncSender.Put(m);
-                // }
+                // asyncSender.Put(m);
+                try {
+                    lock.lock();
+                    asyncSender.writeOne(m);
+                } finally {
+                    lock.unlock();
+                }
             }
         }
     }
