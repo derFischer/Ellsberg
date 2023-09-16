@@ -585,16 +585,18 @@ public class FinalRequestProcessor implements RequestProcessor {
             if (path == null || rsp == null) {
                 responseSize = cnxn.sendResponse(hdr, rsp, "response");
                 // Create, Set will get here
-                // sending() reply to client (write)
-                switch (request.type) {
-                    case OpCode.createSession:
-                    case OpCode.closeSession:
-                    case OpCode.create:
-                    case OpCode.setData:
-                        TxnHeader fakeHeader = new TxnHeader(request.sessionId, request.cxid, 0, 0, 0);
-                        this.zks.simConn.request(SimConn.SimConnMessage.createForClientResp(request.sessionId, fakeHeader));
-                        break;
-                    // case OpCode.getData:
+                // sending() any reply to client (write)
+                if (zks.simConn.enabled()) {
+                    switch (request.type) {
+                        case OpCode.createSession:
+                        case OpCode.closeSession:
+                        case OpCode.create:
+                        case OpCode.setData:
+                            TxnHeader fakeHeader = new TxnHeader(request.sessionId, request.cxid, 0, 0, 0);
+                                this.zks.simConn.request(SimConn.BytesSimConnMessage.createForClientResp(request.sessionId, fakeHeader));
+                            break;
+                        // case OpCode.getData:
+                    }
                 }
             } else {
                 int opCode = request.type;
@@ -608,7 +610,7 @@ public class FinalRequestProcessor implements RequestProcessor {
                         stat = getDataResponse.getStat();
                         responseSize = cnxn.sendResponse(hdr, rsp, "response", path, stat, opCode);
                         // Get will get here
-                        // sending() reply to client (read)
+                        // sending() any reply to client (read)
                         break;
                     }
                     case OpCode.getChildren2 : {

@@ -123,7 +123,7 @@ public class Follower extends Learner {
                 QuorumPacket qp = new QuorumPacket();
                 while (this.isRunning()) {
                     readPacket(qp);
-                    // sending() Follower received a package.
+                    // sending() follower recv a package.
                     processPacket(qp);
                 }
             } catch (Exception e) {
@@ -201,8 +201,10 @@ public class Follower extends Learner {
             }
             break;
         case Leader.COMMIT:
-            // sending() received COMMIT
-            simConn.request(new SimConn.SimConnMessage(self.getMyId(), qp, null));
+            // sending() follower recv COMMIT
+            if (simConn.enabled()) {
+                simConn.request(new SimConn.BytesSimConnMessage(self.getMyId(), qp, null));
+            }
             ServerMetrics.getMetrics().LEARNER_COMMIT_RECEIVED_COUNT.add(1);
             fzk.commit(qp.getZxid());
             if (om != null) {

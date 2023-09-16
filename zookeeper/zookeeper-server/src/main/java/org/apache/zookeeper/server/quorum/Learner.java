@@ -190,7 +190,6 @@ public class Learner {
      * @throws IOException
      */
     void writePacket(QuorumPacket pp, boolean flush) throws IOException {
-        // sending()
         if (asyncSending) {
             sender.queuePacket(pp);
         } else {
@@ -500,8 +499,10 @@ public class Learner {
         qp.setData(bsid.toByteArray());
 
         writePacket(qp, true);
-        // sending() send FOLLOWERINFO
-        simConn.request(new SimConn.SimConnMessage(self.getMyId(), null, qp));
+        // sending() learner send FOLLOWERINFO
+        if (simConn.enabled()) {
+            simConn.request(new SimConn.BytesSimConnMessage(self.getLeaderId(), null, qp));
+        }
         readPacket(qp);
         final long newEpoch = ZxidUtils.getEpochFromZxid(qp.getZxid());
         if (qp.getType() == Leader.LEADERINFO) {
@@ -525,8 +526,10 @@ public class Learner {
                                       + self.getAcceptedEpoch());
             }
             QuorumPacket ackNewEpoch = new QuorumPacket(Leader.ACKEPOCH, lastLoggedZxid, epochBytes, null);
-            // sending() send LEADERINFO,ACKEPOCH
-            simConn.request(new SimConn.SimConnMessage(self.getMyId(), qp, ackNewEpoch));
+            // sending() learner reply LEADERINFO with ACKEPOCH
+            if (simConn.enabled()) {
+                simConn.request(new SimConn.BytesSimConnMessage(self.getLeaderId(), qp, ackNewEpoch));
+            }
             writePacket(ackNewEpoch, true);
             return ZxidUtils.makeZxid(newEpoch, 0);
         } else {
@@ -628,6 +631,10 @@ public class Learner {
             outerLoop:
             while (self.isRunning()) {
                 readPacket(qp);
+                // sending() learner recv sync-related (PROPOSAL, COMMIT, UPTODATE)
+                if (simConn.enabled()) {
+                    simConn.request(new SimConn.BytesSimConnMessage(self.getLeaderId(), qp, null));
+                }
                 switch (qp.getType()) {
                 case Leader.PROPOSAL:
                     PacketInFlight pif = new PacketInFlight();
@@ -770,14 +777,19 @@ public class Learner {
 
                     QuorumPacket ackld = new QuorumPacket(Leader.ACK, newLeaderZxid, null, null);
                     writePacket(ackld, true);
-                    // sending() follower reply NEWLEADER with ACKLD
-                    // simConn.request(new SimConn.SimConnMessage(self.getMyId(), qp, ackld));
+                    // sending() learner reply NEWLEADER with ACKLD
+                     if (simConn.enabled()) {
+                         simConn.request(new SimConn.BytesSimConnMessage(self.getLeaderId(), qp, ackld));
+                     }
                     break;
                 }
             }
         }
         ack.setZxid(ZxidUtils.makeZxid(newEpoch, 0));
         writePacket(ack, true);
+        if (simConn.enabled()) {
+            simConn.request(new SimConn.BytesSimConnMessage(self.getLeaderId(), null, ack));
+        }
         zk.startServing();
         /*
          * Update the election vote here to ensure that all members of the

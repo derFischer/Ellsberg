@@ -1762,7 +1762,6 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
                 }
                 si.setOwner(ServerCnxn.me);
                 submitRequest(si);
-                // sending() receive a Request from client
             }
         }
     }

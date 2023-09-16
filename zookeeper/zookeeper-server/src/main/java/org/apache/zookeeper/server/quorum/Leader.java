@@ -1132,8 +1132,10 @@ public class Leader extends LearnerMaster {
     void sendPacket(QuorumPacket qp) {
         synchronized (forwardingFollowers) {
             for (LearnerHandler f : forwardingFollowers) {
-                // sending() leader sends PROPOSAL, COMMIT, COMMITANDACTIVATE
-                simConn.request(new SimConn.SimConnMessage(f.getSid(), null, qp));
+                // sending() leader send PROPOSAL, COMMIT, COMMITANDACTIVATE
+                if (simConn.enabled()) {
+                    simConn.request(new SimConn.BytesSimConnMessage(f.getSid(), null, qp));
+                }
                 f.queuePacket(qp);
             }
         }

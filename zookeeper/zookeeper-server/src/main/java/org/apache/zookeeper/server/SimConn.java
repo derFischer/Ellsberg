@@ -24,10 +24,26 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class SimConn {
-    public static class SimConnMessage implements Record {
+    public static boolean enabled = false;
+
+    public static interface SimConnMessage extends Record {
+        long length();
+    }
+
+    public static class TimeoutMessage implements SimConnMessage {
+        @Override
+        public void serialize(OutputArchive archive, String tag) throws IOException {}
+
+        @Override
+        public void deserialize(InputArchive archive, String tag) throws IOException {}
+        public long length() { return -1; }
+    }
+
+    public static TimeoutMessage timeoutMessage = new TimeoutMessage();
+
+    public static class BytesSimConnMessage implements SimConnMessage {
 
         protected static final Logger LOG = LoggerFactory.getLogger(SimConnMessage.class);
-        final static SimConnMessage TimeoutForFile = new SimConnMessage(true);
         final static byte[] emptyByteArray = new byte[]{};
         boolean isSend;
         long peerId;
@@ -36,14 +52,9 @@ public class SimConn {
         byte[] recv;
         byte[] send;
 
-        boolean isTimeoutForFile = false;
-
-        public SimConnMessage(boolean isTimeoutForFile) {
-            this.isTimeoutForFile = isTimeoutForFile;
-        }
-
-        static public SimConnMessage createForClientReq(long peerId, TxnHeader hdr) {
-            SimConnMessage m = new SimConnMessage();
+        static public BytesSimConnMessage createForClientReq(long peerId, TxnHeader hdr) {
+            BytesSimConnMessage m = new BytesSimConnMessage();
+            if (!enabled) return m;
             m.isSend = false;
             m.peerId = peerId;
             m.type = "CLIENTREQ";
@@ -51,8 +62,9 @@ public class SimConn {
             m.recv = m.quorumPacketToBytes(hdr);
             return m;
         }
-        static public SimConnMessage createForClientResp(long peerId, TxnHeader hdr) {
-            SimConnMessage m = new SimConnMessage();
+        static public BytesSimConnMessage createForClientResp(long peerId, TxnHeader hdr) {
+            BytesSimConnMessage m = new BytesSimConnMessage();
+            if (!enabled) return m;
             m.isSend = true;
             m.peerId = peerId;
             m.type = "CLIENTRESP";
@@ -61,9 +73,10 @@ public class SimConn {
             return m;
         }
 
-        public SimConnMessage() {}
+        public BytesSimConnMessage() {}
 
-        public SimConnMessage(long peerId, String type, byte[] recv, byte[] send) {
+        public BytesSimConnMessage(long peerId, String type, byte[] recv, byte[] send) {
+            if (!enabled) return;
             assert (recv != null || send != null);
             this.isSend = send != null;
             this.peerId = peerId;
@@ -91,7 +104,8 @@ public class SimConn {
             return emptyByteArray;
         }
 
-        public SimConnMessage(long peerId, QuorumPacket recv, QuorumPacket send) {
+        public BytesSimConnMessage(long peerId, QuorumPacket recv, QuorumPacket send) {
+            if (!enabled) return;
             assert (recv != null || send != null);
             this.isSend = send != null;
             this.peerId = peerId;
@@ -124,12 +138,8 @@ public class SimConn {
         public long length() {
             return 1 + 8 + (4+type.length()) + (4+recv.length) + (4+send.length);
         }
-
-        public String toString() {
-            return String.format("isSend=%b, type=%s\n\trecv: %s\n\tsend: %s\n",
-                    isSend, type, Arrays.toString(recv), Arrays.toString(send));
-        }
     }
+
     private enum MODE {
         NONE,
         ASYNC,
@@ -241,7 +251,7 @@ public class SimConn {
             String formateTime = dateFormatter.format(ZonedDateTime.now());
             Path path = Paths.get(this.logDir, String.format("messages.%s.%s.data", iid, formateTime));
             try {
-                outConn = new BufferedOutputStream(Files.newOutputStream(path), 32768);
+                outConn = new BufferedOutputStream(Files.newOutputStream(path), 4096);
             } catch (IOException e) {
                 LOG.info(e.toString());
                 System.exit(1);
@@ -253,7 +263,7 @@ public class SimConn {
 
         @Override
         public void run() {
-            Runnable putTimeout = () -> this.Put(SimConnMessage.TimeoutForFile);
+            Runnable putTimeout = () -> this.Put(timeoutMessage);
             TimerTask timeoutTask = new TimerTask() {
                 public void run() {
                     putTimeout.run();
@@ -261,12 +271,13 @@ public class SimConn {
             };
 
             Timer timer = new Timer();
-            timer.schedule(timeoutTask, 60*1000L);
+            timer.schedule(timeoutTask, 30*1000L);
             long startMsgCount = 0;
             while (true) {
                 try {
                     SimConnMessage m = sendQueue.take();
-                    if (m.isTimeoutForFile) {
+                    if (m == timeoutMessage) {
+                        outConn.flush();
                         FileWriter metaWriter = new FileWriter(metaFilePath.toFile());
                         metaWriter.write(String.format("%d\n%d\n", startMsgCount, msgCount));
                         startMsgCount = msgCount;
@@ -336,6 +347,7 @@ public class SimConn {
         if (this.mode != MODE.NONE) {
             this.iid = Long.parseLong(System.getenv("IID"));
         }
+        enabled = this.mode != MODE.NONE;
     }
 
     public void init(final long myId) {
@@ -382,14 +394,18 @@ public class SimConn {
     public void request(SimConnMessage m) {
         if (mode != MODE.NONE) {
             if (mode == MODE.ASYNC || mode == MODE.FILE) {
-                // asyncSender.Put(m);
-                try {
-                    lock.lock();
-                    asyncSender.writeOne(m);
-                } finally {
-                    lock.unlock();
-                }
+                asyncSender.Put(m);
+                // try {
+                //     lock.lock();
+                //     asyncSender.writeOne(m);
+                // } finally {
+                //     lock.unlock();
+                // }
             }
         }
+    }
+
+    public boolean enabled() {
+        return this.mode != MODE.NONE;
     }
 }

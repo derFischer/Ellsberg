@@ -45,10 +45,12 @@ public class SendAckRequestProcessor implements RequestProcessor, Flushable {
                 si.logLatency(ServerMetrics.getMetrics().PROPOSAL_ACK_CREATION_LATENCY);
 
                 learner.writePacket(qp, false);
-                // sending() reply PROPOSAL with ACK
+                // sending() follower reply PROPOSAL with ACK
                 // TODO: this is a big hack...
-                QuorumPacket proposalQp = new QuorumPacket(Leader.PROPOSAL, si.getHdr().getZxid(), si.getSerializeData(), null);
-                learner.simConn.request(new SimConn.SimConnMessage(learner.findLeader().getId(), proposalQp, qp));
+                if (learner.simConn.enabled()) {
+                    QuorumPacket proposalQp = new QuorumPacket(Leader.PROPOSAL, si.getHdr().getZxid(), si.getSerializeData(), null);
+                    learner.simConn.request(new SimConn.BytesSimConnMessage(learner.findLeader().getId(), proposalQp, qp));
+                }
             } catch (IOException e) {
                 LOG.warn("Closing connection to leader, exception during packet send", e);
                 try {
