@@ -1047,6 +1047,10 @@ public class LearnerHandler extends ZooKeeperThread {
             // Since this is already a committed proposal, we need to follow
             // it by a commit packet
             queuePacket(propose.packet);
+            // sending() leader send proposal (SYNC stage)
+            if (simConn.enabled()) {
+                simConn.request(new SimConn.BytesSimConnMessage(getSid(), null, propose.packet));
+            }
             queueOpPacket(Leader.COMMIT, packetZxid);
             queuedZxid = packetZxid;
 
@@ -1113,9 +1117,12 @@ public class LearnerHandler extends ZooKeeperThread {
      * @param zxid
      */
     private void queueOpPacket(int type, long zxid) {
-        // sending() leader send sync-related (DIFF, TRUNC, COMMIT)
         QuorumPacket packet = new QuorumPacket(type, zxid, null, null);
         queuePacket(packet);
+        // sending() leader send DIFF/TRUNC/SNAP/COMMIT (SYNC stage)
+        if (simConn.enabled()) {
+            simConn.request(new SimConn.BytesSimConnMessage(getSid(), null, packet));
+        }
     }
 
     void queuePacket(QuorumPacket p) {

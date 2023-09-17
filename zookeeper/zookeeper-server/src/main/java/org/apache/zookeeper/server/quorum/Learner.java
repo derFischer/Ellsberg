@@ -563,6 +563,10 @@ public class Learner {
         boolean snapshotNeeded = true;
         boolean syncSnapshot = false;
         readPacket(qp);
+        // sending() learner recv DIFF/SNAP/TRUNC
+        if (simConn.enabled()) {
+            simConn.request(new SimConn.BytesSimConnMessage(self.getLeaderId(), qp, null));
+        }
         Deque<Long> packetsCommitted = new ArrayDeque<>();
         Deque<PacketInFlight> packetsNotCommitted = new ArrayDeque<>();
         synchronized (zk) {
@@ -631,12 +635,12 @@ public class Learner {
             outerLoop:
             while (self.isRunning()) {
                 readPacket(qp);
-                // sending() learner recv sync-related (PROPOSAL, COMMIT, UPTODATE)
-                if (simConn.enabled()) {
-                    simConn.request(new SimConn.BytesSimConnMessage(self.getLeaderId(), qp, null));
-                }
                 switch (qp.getType()) {
                 case Leader.PROPOSAL:
+                    // sending() learner recv PROPOSAL (SYNC stage)
+                    if (simConn.enabled()) {
+                        simConn.request(new SimConn.BytesSimConnMessage(self.getLeaderId(), qp, null));
+                    }
                     PacketInFlight pif = new PacketInFlight();
                     logEntry = SerializeUtils.deserializeTxn(qp.getData());
                     pif.hdr = logEntry.getHeader();
@@ -660,6 +664,10 @@ public class Learner {
                     break;
                 case Leader.COMMIT:
                 case Leader.COMMITANDACTIVATE:
+                    // sending() learner recv COMMIT (SYNC stage)
+                    if (simConn.enabled()) {
+                        simConn.request(new SimConn.BytesSimConnMessage(self.getLeaderId(), qp, null));
+                    }
                     pif = packetsNotCommitted.peekFirst();
                     if (pif.hdr.getZxid() == qp.getZxid() && qp.getType() == Leader.COMMITANDACTIVATE) {
                         QuorumVerifier qv = self.configFromString(new String(((SetDataTxn) pif.rec).getData(), UTF_8));
@@ -788,7 +796,7 @@ public class Learner {
         ack.setZxid(ZxidUtils.makeZxid(newEpoch, 0));
         writePacket(ack, true);
         if (simConn.enabled()) {
-            simConn.request(new SimConn.BytesSimConnMessage(self.getLeaderId(), null, ack));
+            simConn.request(new SimConn.BytesSimConnMessage(self.getLeaderId(), qp, ack));
         }
         zk.startServing();
         /*
