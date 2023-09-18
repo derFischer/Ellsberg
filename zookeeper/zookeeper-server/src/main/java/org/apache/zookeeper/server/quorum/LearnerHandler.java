@@ -478,11 +478,6 @@ public class LearnerHandler extends ZooKeeperThread {
                 throw new IOException("Non observer attempting to connect to ObserverMaster. type = " + qp.getType());
             }
 
-            // sending() leader recv FOLLOWERINFO (CEPOCH)
-            if (simConn.enabled()) {
-                simConn.request(new SimConn.BytesSimConnMessage(getSid(), qp, null));
-            }
-
             byte[] learnerInfoData = qp.getData();
             if (learnerInfoData != null) {
                 ByteBuffer bbsid = ByteBuffer.wrap(learnerInfoData);
@@ -500,6 +495,11 @@ public class LearnerHandler extends ZooKeeperThread {
                 }
             } else {
                 this.sid = learnerMaster.getAndDecrementFollowerCounter();
+            }
+
+            // sending() leader recv FOLLOWERINFO (CEPOCH)
+            if (simConn.enabled()) {
+                simConn.request(new SimConn.BytesSimConnMessage(getSid(), qp, null));
             }
 
             String followerInfo = learnerMaster.getPeerInfo(this.sid);

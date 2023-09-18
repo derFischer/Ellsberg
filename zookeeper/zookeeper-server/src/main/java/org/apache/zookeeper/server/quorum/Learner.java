@@ -501,7 +501,7 @@ public class Learner {
         writePacket(qp, true);
         // sending() learner send FOLLOWERINFO
         if (simConn.enabled()) {
-            simConn.request(new SimConn.BytesSimConnMessage(self.getLeaderId(), null, qp));
+            simConn.request(new SimConn.BytesSimConnMessage(self.getCurrentVote().getId(), null, qp));
         }
         readPacket(qp);
         final long newEpoch = ZxidUtils.getEpochFromZxid(qp.getZxid());
@@ -528,7 +528,7 @@ public class Learner {
             QuorumPacket ackNewEpoch = new QuorumPacket(Leader.ACKEPOCH, lastLoggedZxid, epochBytes, null);
             // sending() learner reply LEADERINFO with ACKEPOCH
             if (simConn.enabled()) {
-                simConn.request(new SimConn.BytesSimConnMessage(self.getLeaderId(), qp, ackNewEpoch));
+                simConn.request(new SimConn.BytesSimConnMessage(self.getCurrentVote().getId(), qp, ackNewEpoch));
             }
             writePacket(ackNewEpoch, true);
             return ZxidUtils.makeZxid(newEpoch, 0);
