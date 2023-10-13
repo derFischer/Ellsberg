@@ -680,7 +680,9 @@ public class LearnerHandler extends ZooKeeperThread {
                 messageTracker.trackReceived(qp.getType());
                 // sending() leader recv ack/ping/revalidate/request
                 if (simConn.enabled()) {
-                    simConn.request(new SimConn.BytesSimConnMessage(getSid(), qp, null));
+                    if (qp.getType() != Leader.PING) {
+                        simConn.request(new SimConn.BytesSimConnMessage(getSid(), qp, null));
+                    }
                 }
 
                 if (LOG.isTraceEnabled()) {

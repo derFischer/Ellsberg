@@ -593,9 +593,11 @@ public class FinalRequestProcessor implements RequestProcessor {
                         case OpCode.create:
                         case OpCode.setData:
                             TxnHeader fakeHeader = new TxnHeader(request.sessionId, request.cxid, 0, 0, 0);
-                                this.zks.simConn.request(SimConn.BytesSimConnMessage.createForClientResp(request.sessionId, fakeHeader));
+                            this.zks.simConn.request(SimConn.BytesSimConnMessage.createForClientResp(request.sessionId, fakeHeader, false));
                             break;
-                        // case OpCode.getData:
+                    }
+                    if (request.type == OpCode.getData) {
+                        LOG.info("\033[1;31munexpected read here (wzh)\033[0m");
                     }
                 }
             } else {
@@ -611,6 +613,8 @@ public class FinalRequestProcessor implements RequestProcessor {
                         responseSize = cnxn.sendResponse(hdr, rsp, "response", path, stat, opCode);
                         // Get will get here
                         // sending() any reply to client (read)
+                        TxnHeader fakeHeader = new TxnHeader(request.sessionId, request.cxid, 0, 0, 0);
+                        this.zks.simConn.request(SimConn.BytesSimConnMessage.createForClientResp(request.sessionId, fakeHeader, true));
                         break;
                     }
                     case OpCode.getChildren2 : {

@@ -52,22 +52,30 @@ public class SimConn {
         byte[] recv;
         byte[] send;
 
-        static public BytesSimConnMessage createForClientReq(long peerId, TxnHeader hdr) {
+        static public BytesSimConnMessage createForClientReq(long peerId, TxnHeader hdr, boolean isReadOnly) {
             BytesSimConnMessage m = new BytesSimConnMessage();
             if (!enabled) return m;
             m.isSend = false;
             m.peerId = peerId;
-            m.type = "CLIENTREQ";
+            if (!isReadOnly) {
+                m.type = "CLIENTREQ";
+            } else {
+                m.type = "CLIENTRO";
+            }
             m.send = emptyByteArray;
             m.recv = m.quorumPacketToBytes(hdr);
             return m;
         }
-        static public BytesSimConnMessage createForClientResp(long peerId, TxnHeader hdr) {
+        static public BytesSimConnMessage createForClientResp(long peerId, TxnHeader hdr, boolean isReadOnly) {
             BytesSimConnMessage m = new BytesSimConnMessage();
             if (!enabled) return m;
             m.isSend = true;
             m.peerId = peerId;
-            m.type = "CLIENTRESP";
+            if (!isReadOnly) {
+                m.type = "CLIENTRESP";
+            } else {
+                m.type = "CLIENTRORESP";
+            }
             m.send = m.quorumPacketToBytes(hdr);
             m.recv = emptyByteArray;
             return m;
@@ -242,7 +250,7 @@ public class SimConn {
             super();
             this.iid = iid;
             String formateTime = dateFormatter.format(ZonedDateTime.now());
-            this.logDir = "/mydata/log" + formateTime;
+            this.logDir = "/tmp/log/log" + formateTime;
             new File(logDir).mkdirs();
             changeFile();
         }
@@ -251,7 +259,7 @@ public class SimConn {
             String formateTime = dateFormatter.format(ZonedDateTime.now());
             Path path = Paths.get(this.logDir, String.format("messages.%s.%s.data", iid, formateTime));
             try {
-                outConn = new BufferedOutputStream(Files.newOutputStream(path), 4096);
+                outConn = new BufferedOutputStream(Files.newOutputStream(path), 8192);
             } catch (IOException e) {
                 LOG.info(e.toString());
                 System.exit(1);
@@ -296,10 +304,7 @@ public class SimConn {
                     msgCount++;
                     outArchive.writeLong(m.length(), "length");
                     m.serialize(outArchive, "packet");
-                } catch (IOException e) {
-                    LOG.error(e.toString());
-                    System.exit(1);
-                } catch (InterruptedException e) {
+                } catch (IOException | InterruptedException e) {
                     LOG.error(e.toString());
                     System.exit(1);
                 }
