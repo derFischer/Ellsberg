@@ -322,40 +322,40 @@ public class Leader extends LearnerMaster {
     /**
      * This message is for follower to expect diff
      */
-    static final int DIFF = 13;
+    public static final int DIFF = 13;
 
     /**
      * This is for follower to truncate its logs
      */
-    static final int TRUNC = 14;
+    public static final int TRUNC = 14;
 
     /**
      * This is for follower to download the snapshots
      */
-    static final int SNAP = 15;
+    public static final int SNAP = 15;
 
     /**
      * This tells the leader that the connecting peer is actually an observer
      */
-    static final int OBSERVERINFO = 16;
+    public static final int OBSERVERINFO = 16;
 
     /**
      * This message type is sent by the leader to indicate it's zxid and if
      * needed, its database.
      */
-    static final int NEWLEADER = 10;
+    public static final int NEWLEADER = 10;
 
     /**
      * This message type is sent by a follower to pass the last zxid. This is here
      * for backward compatibility purposes.
      */
-    static final int FOLLOWERINFO = 11;
+    public static final int FOLLOWERINFO = 11;
 
     /**
      * This message type is sent by the leader to indicate that the follower is
      * now uptodate andt can start responding to clients.
      */
-    static final int UPTODATE = 12;
+    public static final int UPTODATE = 12;
 
     /**
      * This message is the first that a follower receives from the leader.
@@ -372,7 +372,7 @@ public class Leader extends LearnerMaster {
      * This message type is sent to a leader to request and mutation operation.
      * The payload will consist of a request header followed by a request.
      */
-    static final int REQUEST = 1;
+    public static final int REQUEST = 1;
 
     /**
      * This message type is sent by a leader to propose a mutation.
@@ -382,45 +382,45 @@ public class Leader extends LearnerMaster {
     /**
      * This message type is sent by a follower after it has synced a proposal.
      */
-    static final int ACK = 3;
+    public static final int ACK = 3;
 
     /**
      * This message type is sent by a leader to commit a proposal and cause
      * followers to start serving the corresponding data.
      */
-    static final int COMMIT = 4;
+    public static final int COMMIT = 4;
 
     /**
      * This message type is enchanged between follower and leader (initiated by
      * follower) to determine liveliness.
      */
-    static final int PING = 5;
+    public static final int PING = 5;
 
     /**
      * This message type is to validate a session that should be active.
      */
-    static final int REVALIDATE = 6;
+    public static final int REVALIDATE = 6;
 
     /**
      * This message is a reply to a synchronize command flushing the pipe
      * between the leader and the follower.
      */
-    static final int SYNC = 7;
+    public static final int SYNC = 7;
 
     /**
      * This message type informs observers of a committed proposal.
      */
-    static final int INFORM = 8;
+    public static final int INFORM = 8;
 
     /**
      * Similar to COMMIT, only for a reconfig operation.
      */
-    static final int COMMITANDACTIVATE = 9;
+    public static final int COMMITANDACTIVATE = 9;
 
     /**
      * Similar to INFORM, only for a reconfig operation.
      */
-    static final int INFORMANDACTIVATE = 19;
+    public static final int INFORMANDACTIVATE = 19;
 
     final ConcurrentMap<Long, Proposal> outstandingProposals = new ConcurrentHashMap<>();
 
@@ -1250,6 +1250,7 @@ public class Leader extends LearnerMaster {
 
         byte[] data = request.getSerializeData();
         proposalStats.setLastBufferSize(data.length);
+        LOG.info("\033[1;31mdatalen={}\033[0m", data.length);
         QuorumPacket pp = new QuorumPacket(Leader.PROPOSAL, request.zxid, data, null);
 
         Proposal p = new Proposal();
