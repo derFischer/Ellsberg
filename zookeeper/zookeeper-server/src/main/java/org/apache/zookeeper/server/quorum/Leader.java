@@ -1250,7 +1250,6 @@ public class Leader extends LearnerMaster {
 
         byte[] data = request.getSerializeData();
         proposalStats.setLastBufferSize(data.length);
-        LOG.info("\033[1;31mdatalen={}\033[0m", data.length);
         QuorumPacket pp = new QuorumPacket(Leader.PROPOSAL, request.zxid, data, null);
 
         Proposal p = new Proposal();
