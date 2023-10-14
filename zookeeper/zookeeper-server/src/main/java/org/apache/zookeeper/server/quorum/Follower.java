@@ -162,6 +162,10 @@ public class Follower extends Learner {
             ping(qp);
             break;
         case Leader.PROPOSAL:
+            // sending() follower recv PROPOSAL (will reply later)
+            if (simConn.enabled()) {
+                simConn.request(new SimConn.RecordSimConnMessage(self.getMyId(), false, qp));
+            }
             ServerMetrics.getMetrics().LEARNER_PROPOSAL_RECEIVED_COUNT.add(1);
             TxnLogEntry logEntry = SerializeUtils.deserializeTxn(qp.getData());
             TxnHeader hdr = logEntry.getHeader();
@@ -203,7 +207,7 @@ public class Follower extends Learner {
         case Leader.COMMIT:
             // sending() follower recv COMMIT
             if (simConn.enabled()) {
-                simConn.request(new SimConn.RecordSimConnMessage(self.getMyId(), qp, null));
+                simConn.request(new SimConn.RecordSimConnMessage(self.getMyId(), false, qp));
             }
             ServerMetrics.getMetrics().LEARNER_COMMIT_RECEIVED_COUNT.add(1);
             fzk.commit(qp.getZxid());

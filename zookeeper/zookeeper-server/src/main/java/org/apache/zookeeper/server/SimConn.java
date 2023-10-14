@@ -53,13 +53,10 @@ public class SimConn {
         boolean isSend;
         long peerId;
         // not | qp
-        int recvType = -1;
-        int sendType = -1;
-        Record recv;
-        Record send;
+        int type = -1;
+        Record record;
 
-        byte[] recvBytes;
-        byte[] sendBytes;
+        byte[] bytes;
 
         byte[] quorumPacketToBytes(Record qp) {
             if (qp == null) {
@@ -87,12 +84,11 @@ public class SimConn {
             m.isSend = false;
             m.peerId = peerId;
             if (!isReadOnly) {
-                m.recvType = CLIENTREQ;
+                m.type = CLIENTREQ;
             } else {
-                m.recvType = CLIENTRO;
+                m.type = CLIENTRO;
             }
-            m.send = null;
-            m.recv = hdr;
+            m.record = hdr;
             return m;
         }
         static public RecordSimConnMessage createForClientResp(long peerId, TxnHeader hdr, boolean isReadOnly) {
@@ -101,44 +97,32 @@ public class SimConn {
             m.isSend = true;
             m.peerId = peerId;
             if (!isReadOnly) {
-                m.sendType = CLIENTRESP;
+                m.type = CLIENTRESP;
             } else {
-                m.sendType = CLIENTRORESP;
+                m.type = CLIENTRORESP;
             }
-            m.send = hdr;
-            m.recv = null;
+            m.record = hdr;
             return m;
         }
 
-        public RecordSimConnMessage(long peerId, QuorumPacket recv, QuorumPacket send) {
+        public RecordSimConnMessage(long peerId, boolean isSend, QuorumPacket qp) {
             if (!enabled) return;
-            assert (recv != null || send != null);
-            this.isSend = send != null;
+            assert (qp != null);
+            this.isSend = isSend;
             this.peerId = peerId;
-            if (recv != null) {
-                this.recvType = recv.getType();
-            }
-            if (send != null) {
-                this.sendType = send.getType();
-            }
-            this.recv = recv;
-            this.send = send;
+            this.type = qp.getType();
+            this.record = qp;
         }
 
         public void serialize(OutputArchive a_, String tag) throws java.io.IOException {
-            if (recvBytes == null) {
-                recvBytes = quorumPacketToBytes(recv);
-            }
-            if (sendBytes == null) {
-                sendBytes = quorumPacketToBytes(send);
+            if (bytes == null) {
+                bytes = quorumPacketToBytes(record);
             }
             a_.startRecord(this,tag);
             a_.writeBool(isSend, "");
             a_.writeLong(peerId, "");
-            a_.writeInt(recvType, "");
-            a_.writeInt(sendType, "");
-            a_.writeBuffer(recvBytes, "");
-            a_.writeBuffer(sendBytes, "");
+            a_.writeInt(type, "");
+            a_.writeBuffer(bytes, "");
             a_.endRecord(this, tag);
         }
 
@@ -148,13 +132,10 @@ public class SimConn {
         }
 
         public long length() {
-            if (recvBytes == null) {
-                recvBytes = quorumPacketToBytes(recv);
+            if (bytes == null) {
+                bytes = quorumPacketToBytes(record);
             }
-            if (sendBytes == null) {
-                sendBytes = quorumPacketToBytes(send);
-            }
-            return 1 + 8 + 4 + 4 + (4+recvBytes.length) + (4+sendBytes.length);
+            return 1 + 8 + 4 + (4+bytes.length);
         }
     }
 
