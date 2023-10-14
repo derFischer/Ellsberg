@@ -501,7 +501,7 @@ public class Learner {
         writePacket(qp, true);
         // sending() learner send FOLLOWERINFO
         if (simConn.enabled()) {
-            simConn.request(new SimConn.BytesSimConnMessage(self.getCurrentVote().getId(), null, qp));
+            simConn.request(new SimConn.RecordSimConnMessage(self.getCurrentVote().getId(), null, qp));
         }
         readPacket(qp);
         final long newEpoch = ZxidUtils.getEpochFromZxid(qp.getZxid());
@@ -528,7 +528,7 @@ public class Learner {
             QuorumPacket ackNewEpoch = new QuorumPacket(Leader.ACKEPOCH, lastLoggedZxid, epochBytes, null);
             // sending() learner reply LEADERINFO with ACKEPOCH
             if (simConn.enabled()) {
-                simConn.request(new SimConn.BytesSimConnMessage(self.getCurrentVote().getId(), qp, ackNewEpoch));
+                simConn.request(new SimConn.RecordSimConnMessage(self.getCurrentVote().getId(), qp, ackNewEpoch));
             }
             writePacket(ackNewEpoch, true);
             return ZxidUtils.makeZxid(newEpoch, 0);
@@ -565,7 +565,7 @@ public class Learner {
         readPacket(qp);
         // sending() learner recv DIFF/SNAP/TRUNC
         if (simConn.enabled()) {
-            simConn.request(new SimConn.BytesSimConnMessage(self.getLeaderId(), qp, null));
+            simConn.request(new SimConn.RecordSimConnMessage(self.getLeaderId(), qp, null));
         }
         Deque<Long> packetsCommitted = new ArrayDeque<>();
         Deque<PacketInFlight> packetsNotCommitted = new ArrayDeque<>();
@@ -639,7 +639,7 @@ public class Learner {
                 case Leader.PROPOSAL:
                     // sending() learner recv PROPOSAL (SYNC stage)
                     if (simConn.enabled()) {
-                        simConn.request(new SimConn.BytesSimConnMessage(self.getLeaderId(), qp, null));
+                        simConn.request(new SimConn.RecordSimConnMessage(self.getLeaderId(), qp, null));
                     }
                     PacketInFlight pif = new PacketInFlight();
                     logEntry = SerializeUtils.deserializeTxn(qp.getData());
@@ -666,7 +666,7 @@ public class Learner {
                 case Leader.COMMITANDACTIVATE:
                     // sending() learner recv COMMIT (SYNC stage)
                     if (simConn.enabled()) {
-                        simConn.request(new SimConn.BytesSimConnMessage(self.getLeaderId(), qp, null));
+                        simConn.request(new SimConn.RecordSimConnMessage(self.getLeaderId(), qp, null));
                     }
                     pif = packetsNotCommitted.peekFirst();
                     if (pif.hdr.getZxid() == qp.getZxid() && qp.getType() == Leader.COMMITANDACTIVATE) {
@@ -787,7 +787,7 @@ public class Learner {
                     writePacket(ackld, true);
                     // sending() learner reply NEWLEADER with ACKLD
                      if (simConn.enabled()) {
-                         simConn.request(new SimConn.BytesSimConnMessage(self.getLeaderId(), qp, ackld));
+                         simConn.request(new SimConn.RecordSimConnMessage(self.getLeaderId(), qp, ackld));
                      }
                     break;
                 }
@@ -796,7 +796,7 @@ public class Learner {
         ack.setZxid(ZxidUtils.makeZxid(newEpoch, 0));
         writePacket(ack, true);
         if (simConn.enabled()) {
-            simConn.request(new SimConn.BytesSimConnMessage(self.getLeaderId(), qp, ack));
+            simConn.request(new SimConn.RecordSimConnMessage(self.getLeaderId(), qp, ack));
         }
         zk.startServing();
         /*

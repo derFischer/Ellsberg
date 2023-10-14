@@ -203,7 +203,7 @@ public class Follower extends Learner {
         case Leader.COMMIT:
             // sending() follower recv COMMIT
             if (simConn.enabled()) {
-                simConn.request(new SimConn.BytesSimConnMessage(self.getMyId(), qp, null));
+                simConn.request(new SimConn.RecordSimConnMessage(self.getMyId(), qp, null));
             }
             ServerMetrics.getMetrics().LEARNER_COMMIT_RECEIVED_COUNT.add(1);
             fzk.commit(qp.getZxid());

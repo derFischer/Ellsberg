@@ -499,7 +499,7 @@ public class LearnerHandler extends ZooKeeperThread {
 
             // sending() leader recv FOLLOWERINFO (CEPOCH)
             if (simConn.enabled()) {
-                simConn.request(new SimConn.BytesSimConnMessage(getSid(), qp, null));
+                simConn.request(new SimConn.RecordSimConnMessage(getSid(), qp, null));
             }
 
             String followerInfo = learnerMaster.getPeerInfo(this.sid);
@@ -541,7 +541,7 @@ public class LearnerHandler extends ZooKeeperThread {
                 bufferedOutput.flush();
                 // sending() leader send LAEDERINFO (NEWEPOCH)
                 if (simConn.enabled()) {
-                    simConn.request(new SimConn.BytesSimConnMessage(getSid(), null, newEpochPacket));
+                    simConn.request(new SimConn.RecordSimConnMessage(getSid(), null, newEpochPacket));
                 }
                 QuorumPacket ackEpochPacket = new QuorumPacket();
                 ia.readRecord(ackEpochPacket, "packet");
@@ -552,7 +552,7 @@ public class LearnerHandler extends ZooKeeperThread {
                 }
                 // sending() leader recv ACK-E
                 if (simConn.enabled()) {
-                    simConn.request(new SimConn.BytesSimConnMessage(getSid(), ackEpochPacket, null));
+                    simConn.request(new SimConn.RecordSimConnMessage(getSid(), ackEpochPacket, null));
                 }
                 ByteBuffer bbepoch = ByteBuffer.wrap(ackEpochPacket.getData());
                 ss = new StateSummary(bbepoch.getInt(), ackEpochPacket.getZxid());
@@ -613,7 +613,7 @@ public class LearnerHandler extends ZooKeeperThread {
                 QuorumPacket newLeaderQP = new QuorumPacket(Leader.NEWLEADER, newLeaderZxid, learnerMaster.getQuorumVerifierBytes(), null);
                 // sending() leader send NEWLEADER
                 if (simConn.enabled()) {
-                    simConn.request(new SimConn.BytesSimConnMessage(getSid(), null, newLeaderQP));
+                    simConn.request(new SimConn.RecordSimConnMessage(getSid(), null, newLeaderQP));
                 }
                 queuedPackets.add(newLeaderQP);
             }
@@ -637,7 +637,7 @@ public class LearnerHandler extends ZooKeeperThread {
             }
             // sending() leader recv ACKLD
             if (simConn.enabled()) {
-                simConn.request(new SimConn.BytesSimConnMessage(getSid(), qp, null));
+                simConn.request(new SimConn.RecordSimConnMessage(getSid(), qp, null));
             }
 
             LOG.debug("Received NEWLEADER-ACK message from {}", sid);
@@ -670,7 +670,7 @@ public class LearnerHandler extends ZooKeeperThread {
             QuorumPacket uptodate = new QuorumPacket(Leader.UPTODATE, -1, null, null);
             // sending() leader send UPTODATE (TOCHECK: maybe same as COMMIT-LD)
             if (simConn.enabled()) {
-                simConn.request(new SimConn.BytesSimConnMessage(getSid(), null, uptodate));
+                simConn.request(new SimConn.RecordSimConnMessage(getSid(), null, uptodate));
             }
             queuedPackets.add(uptodate);
 
@@ -681,7 +681,7 @@ public class LearnerHandler extends ZooKeeperThread {
                 // sending() leader recv ack/ping/revalidate/request
                 if (simConn.enabled()) {
                     if (qp.getType() != Leader.PING) {
-                        simConn.request(new SimConn.BytesSimConnMessage(getSid(), qp, null));
+                        simConn.request(new SimConn.RecordSimConnMessage(getSid(), qp, null));
                     }
                 }
 
@@ -1051,7 +1051,7 @@ public class LearnerHandler extends ZooKeeperThread {
             queuePacket(propose.packet);
             // sending() leader send proposal (SYNC stage)
             if (simConn.enabled()) {
-                simConn.request(new SimConn.BytesSimConnMessage(getSid(), null, propose.packet));
+                simConn.request(new SimConn.RecordSimConnMessage(getSid(), null, propose.packet));
             }
             queueOpPacket(Leader.COMMIT, packetZxid);
             queuedZxid = packetZxid;
@@ -1123,7 +1123,7 @@ public class LearnerHandler extends ZooKeeperThread {
         queuePacket(packet);
         // sending() leader send DIFF/TRUNC/SNAP/COMMIT (SYNC stage)
         if (simConn.enabled()) {
-            simConn.request(new SimConn.BytesSimConnMessage(getSid(), null, packet));
+            simConn.request(new SimConn.RecordSimConnMessage(getSid(), null, packet));
         }
     }
 

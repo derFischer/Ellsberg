@@ -41,100 +41,104 @@ public class SimConn {
 
     public static TimeoutMessage timeoutMessage = new TimeoutMessage();
 
-    public static class BytesSimConnMessage implements SimConnMessage {
+    public static final int NOT = 0x10000000;
+    public static final int CLIENTREQ = 0x10000001;
+    public static final int CLIENTRESP = 0x10000002;
+    public static final int CLIENTRO = 0x10000003;
+    public static final int CLIENTRORESP = 0x10000004;
 
+    public static class RecordSimConnMessage implements SimConnMessage {
         protected static final Logger LOG = LoggerFactory.getLogger(SimConnMessage.class);
         final static byte[] emptyByteArray = new byte[]{};
         boolean isSend;
         long peerId;
         // not | qp
-        String type;
-        byte[] recv;
-        byte[] send;
+        int recvType = -1;
+        int sendType = -1;
+        Record recv;
+        Record send;
 
-        static public BytesSimConnMessage createForClientReq(long peerId, TxnHeader hdr, boolean isReadOnly) {
-            BytesSimConnMessage m = new BytesSimConnMessage();
-            if (!enabled) return m;
-            m.isSend = false;
-            m.peerId = peerId;
-            if (!isReadOnly) {
-                m.type = "CLIENTREQ";
-            } else {
-                m.type = "CLIENTRO";
-            }
-            m.send = emptyByteArray;
-            m.recv = m.quorumPacketToBytes(hdr);
-            return m;
-        }
-        static public BytesSimConnMessage createForClientResp(long peerId, TxnHeader hdr, boolean isReadOnly) {
-            BytesSimConnMessage m = new BytesSimConnMessage();
-            if (!enabled) return m;
-            m.isSend = true;
-            m.peerId = peerId;
-            if (!isReadOnly) {
-                m.type = "CLIENTRESP";
-            } else {
-                m.type = "CLIENTRORESP";
-            }
-            m.send = m.quorumPacketToBytes(hdr);
-            m.recv = emptyByteArray;
-            return m;
-        }
-
-        public BytesSimConnMessage() {}
-
-        public BytesSimConnMessage(long peerId, String type, byte[] recv, byte[] send) {
-            if (!enabled) return;
-            assert (recv != null || send != null);
-            this.isSend = send != null;
-            this.peerId = peerId;
-            this.type = type;
-            this.recv = recv != null ? recv : emptyByteArray;
-            this.send = send != null ? send : emptyByteArray;
-        }
+        byte[] recvBytes;
+        byte[] sendBytes;
 
         byte[] quorumPacketToBytes(Record qp) {
+            if (qp == null) {
+                return emptyByteArray;
+            }
             ByteArrayOutputStream s = new ByteArrayOutputStream();
             try {
-                if (qp != null) {
-                    DataOutputStream ds = new DataOutputStream(s);
-                    BinaryOutputArchive outputArchive = new BinaryOutputArchive(ds);
-                    qp.serialize(outputArchive, "qp");
-                    ds.flush();
-                    return s.toByteArray();
-                } else {
-                    return emptyByteArray;
-                }
+                DataOutputStream ds = new DataOutputStream(s);
+                BinaryOutputArchive outputArchive = new BinaryOutputArchive(ds);
+                qp.serialize(outputArchive, "qp");
+                ds.flush();
+                return s.toByteArray();
             } catch (java.io.IOException e) {
                 LOG.error(e.toString());
                 System.exit(1);
             }
-            return emptyByteArray;
+            return null;
         }
 
-        public BytesSimConnMessage(long peerId, QuorumPacket recv, QuorumPacket send) {
+        public RecordSimConnMessage() {}
+
+        static public RecordSimConnMessage createForClientReq(long peerId, TxnHeader hdr, boolean isReadOnly) {
+            RecordSimConnMessage m = new RecordSimConnMessage();
+            if (!enabled) return m;
+            m.isSend = false;
+            m.peerId = peerId;
+            if (!isReadOnly) {
+                m.recvType = CLIENTREQ;
+            } else {
+                m.recvType = CLIENTRO;
+            }
+            m.send = null;
+            m.recv = hdr;
+            return m;
+        }
+        static public RecordSimConnMessage createForClientResp(long peerId, TxnHeader hdr, boolean isReadOnly) {
+            RecordSimConnMessage m = new RecordSimConnMessage();
+            if (!enabled) return m;
+            m.isSend = true;
+            m.peerId = peerId;
+            if (!isReadOnly) {
+                m.sendType = CLIENTRESP;
+            } else {
+                m.sendType = CLIENTRORESP;
+            }
+            m.send = hdr;
+            m.recv = null;
+            return m;
+        }
+
+        public RecordSimConnMessage(long peerId, QuorumPacket recv, QuorumPacket send) {
             if (!enabled) return;
             assert (recv != null || send != null);
             this.isSend = send != null;
             this.peerId = peerId;
-            if (recv == null && send != null) {
-                this.type = Leader.getPacketType(send.getType());
-            } else if (recv != null && send == null) {
-                this.type = Leader.getPacketType(recv.getType());
-            } else {
-                this.type = Leader.getPacketType(recv.getType()) + "," + Leader.getPacketType(send.getType());
+            if (recv != null) {
+                this.recvType = recv.getType();
             }
-            this.recv = quorumPacketToBytes(recv);
-            this.send = quorumPacketToBytes(send);
+            if (send != null) {
+                this.sendType = send.getType();
+            }
+            this.recv = recv;
+            this.send = send;
         }
 
         public void serialize(OutputArchive a_, String tag) throws java.io.IOException {
+            if (recvBytes == null) {
+                recvBytes = quorumPacketToBytes(recv);
+            }
+            if (sendBytes == null) {
+                sendBytes = quorumPacketToBytes(send);
+            }
             a_.startRecord(this,tag);
-            a_.writeBool(isSend, "isSend");
-            a_.writeLong(peerId, "peerId");
-            a_.writeString(type, "type");
-            a_.writeBuffer(recv, "recv");
-            a_.writeBuffer(send, "send");
+            a_.writeBool(isSend, "");
+            a_.writeLong(peerId, "");
+            a_.writeInt(recvType, "");
+            a_.writeInt(sendType, "");
+            a_.writeBuffer(recvBytes, "");
+            a_.writeBuffer(sendBytes, "");
             a_.endRecord(this, tag);
         }
 
@@ -144,7 +148,69 @@ public class SimConn {
         }
 
         public long length() {
-            return 1 + 8 + (4+type.length()) + (4+recv.length) + (4+send.length);
+            if (recvBytes == null) {
+                recvBytes = quorumPacketToBytes(recv);
+            }
+            if (sendBytes == null) {
+                sendBytes = quorumPacketToBytes(send);
+            }
+            return 1 + 8 + 4 + 4 + (4+recvBytes.length) + (4+sendBytes.length);
+        }
+    }
+
+    public static class BytesSimConnMessage implements SimConnMessage {
+
+        protected static final Logger LOG = LoggerFactory.getLogger(SimConnMessage.class);
+        final static byte[] emptyByteArray = new byte[]{};
+        boolean isSend;
+        long peerId;
+        // not | qp
+        int recvType = -1;
+        int sendType = -1;
+        byte[] recv;
+        byte[] send;
+
+        public BytesSimConnMessage() {}
+
+        public BytesSimConnMessage(long peerId, int type, byte[] recv, byte[] send) {
+            if (!enabled) return;
+            assert (recv != null || send != null);
+            this.isSend = send != null;
+            this.peerId = peerId;
+            if (recv == null) {
+                this.recv = emptyByteArray;
+                this.recvType = -1;
+            } else {
+                this.recv = recv;
+                this.recvType = type;
+            }
+            if (send == null) {
+                this.send = emptyByteArray;
+                this.sendType = -1;
+            } else {
+                this.send = send;
+                this.sendType = type;
+            }
+        }
+
+        public void serialize(OutputArchive a_, String tag) throws java.io.IOException {
+            a_.startRecord(this,tag);
+            a_.writeBool(isSend, "");
+            a_.writeLong(peerId, "");
+            a_.writeInt(recvType, "");
+            a_.writeInt(sendType, "");
+            a_.writeBuffer(recv, "");
+            a_.writeBuffer(send, "");
+            a_.endRecord(this, tag);
+        }
+
+        public void deserialize(InputArchive archive, String tag) throws java.io.IOException {
+            LOG.error("deserialize not implemented");
+            System.exit(1);
+        }
+
+        public long length() {
+            return 1 + 8 + 4 + 4 + (4+recv.length) + (4+send.length);
         }
     }
 

@@ -49,7 +49,7 @@ public class SendAckRequestProcessor implements RequestProcessor, Flushable {
                 // TODO: this is a big hack...
                 if (learner.simConn.enabled()) {
                     QuorumPacket proposalQp = new QuorumPacket(Leader.PROPOSAL, si.getHdr().getZxid(), si.getSerializeData(), null);
-                    learner.simConn.request(new SimConn.BytesSimConnMessage(learner.findLeader().getId(), proposalQp, qp));
+                    learner.simConn.request(new SimConn.RecordSimConnMessage(learner.findLeader().getId(), proposalQp, qp));
                 }
             } catch (IOException e) {
                 LOG.warn("Closing connection to leader, exception during packet send", e);
