@@ -1094,8 +1094,7 @@ public class LearnerHandler extends ZooKeeperThread {
             LOG.warn("Ignoring unexpected exception", e);
         }
 
-        this.simConn.flush();
-        this.simConn.asyncSender.interrupt();
+        this.simConn.shutdown();
 
         closeSocket();
 

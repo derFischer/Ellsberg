@@ -1344,9 +1344,8 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
         Follower f = new Follower(this, new FollowerZooKeeperServer(logFactory, this, this.zkDb));
         f.setSimConn(simConn);
         f.zk.simConn = simConn;
-        f.zk.simConnSendResp = simConnSendResp;
-        f.zk.simConnRecvReq = simConnRecvReq;
-        f.zk.simConnAck = simConnAck;
+        f.zk.simConnAck = new SimConn();
+        f.zk.simConnAck.init(simConn.myid, "ack");
         return f;
     }
 
@@ -1354,8 +1353,10 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
         Leader l = new Leader(this, new LeaderZooKeeperServer(logFactory, this, this.zkDb));
         l.setSimConn(simConn);
         l.zk.simConn = simConn;
-        l.zk.simConnSendResp = simConnSendResp;
-        l.zk.simConnRecvReq = simConnRecvReq;
+        l.zk.simConnSendResp = new SimConn();
+        l.zk.simConnRecvReq = new SimConn();
+        l.zk.simConnRecvReq.init(simConn.myid, "recvreq");
+        l.zk.simConnSendResp.init(simConn.myid, "sendresp");
         return l;
     }
 

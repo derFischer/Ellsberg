@@ -14,21 +14,20 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.LinkedTransferQueue;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class SimConn {
     public static boolean enabled = false;
-    final static public DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
-    final public static String initTime = dateFormatter.format(ZonedDateTime.now());
+    final static public DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneId.systemDefault());
+    static final public long initTime = System.currentTimeMillis();
 
     public static class SimConnMessage implements Record {
         final public static int TIMEOUT_TYPE = 0;
@@ -40,6 +39,14 @@ public class SimConn {
 
         public SimConnMessage() {
             simConnMessageType = -1;
+        }
+
+        public SimConnMessage(int simConnMessageType) {
+            this.simConnMessageType = simConnMessageType;
+        }
+        public SimConnMessage(long ts, int simConnMessageType) {
+            this.timestamp = ts;
+            this.simConnMessageType = simConnMessageType;
         }
 
         @Override
@@ -225,10 +232,15 @@ public class SimConn {
 
     public static class AsyncSender extends Thread {
         // Note that BlockingQueue is thread-safe, we don't need additional lock.
-        private LinkedBlockingQueue<SimConnMessage> sendQueue;
+        private final LinkedBlockingQueue<SimConnMessage> sendQueue;
         protected OutputStream outConn;
         protected OutputArchive outArchive;
         public long msgCount;
+        final static public int NOT_READY = 0;
+        final static public int RUNNING = 1;
+        final static public int STOPPING = 2;
+        final static public int SHUTDOWN = 3;
+        public int state = NOT_READY;
 
         AsyncSender() {
             this.sendQueue = new LinkedBlockingQueue<>();
@@ -248,12 +260,14 @@ public class SimConn {
         }
 
         public void run() {
+            state = RUNNING;
             while (true) {
                 try {
                     SimConnMessage m = sendQueue.take();
                     outArchive.writeInt(m.simConnMessageType, "");
                     m.serialize(outArchive, "packet");
                 } catch (java.io.IOException | InterruptedException e) {
+                    state = SHUTDOWN;
                     LOG.info(e.toString());
                     System.exit(1);
                 }
@@ -269,30 +283,45 @@ public class SimConn {
             }
         }
 
-        public void flush() throws IOException {
+        protected void flush() throws IOException {
             outConn.flush();
         }
     }
     // End of AsyncSender
 
     public static class AsyncFileWriter extends AsyncSender {
-        public static long warmupDelay = 10 * 1000L;
-        public static long filePeriod = 10 * 1000L;
+        public static long interval = 10 * 1_000L;
         public static int queueSize = 262144;
         public long iid;
         public String tag;
         public String logDir;
-        public Path metaFilePath;
 
-        public long beginTs;
-        public long interval;
+        long startMsgCount = 0;
+
+        public long queueBeginTs;
+        public long fileBeginTs;
 
         public static class SendQueue {
             public ArrayList<SimConnMessage> queue;
-            final public String date;
-            public SendQueue(String date, int size) {
-                this.date = date;
+            final public long beginTs;
+            final public Path dataPath;
+            final public Path metaPath;
+            public SendQueue(long beginTs, int size, AsyncFileWriter afw) {
+                this.beginTs = beginTs;
                 queue = new ArrayList<>(size);
+                final String formatTime = dateFormatter.format(java.time.Instant.ofEpochMilli(beginTs));
+                Path timeSlotDir = Paths.get(afw.logDir, formatTime);
+                timeSlotDir.toFile().mkdirs();
+                dataPath = Paths.get(timeSlotDir.toString(), String.format("messages.%s.%s.data", afw.iid, afw.tag));
+                metaPath = Paths.get(timeSlotDir.toString(), String.format("messages.%s.%s.meta", afw.iid, afw.tag));
+                try {
+                    afw.outConn = new BufferedOutputStream(Files.newOutputStream(dataPath), 8192);
+                } catch (IOException e) {
+                    LOG.info(e.toString());
+                    System.exit(1);
+                }
+                // Update outArchive
+                afw.updateOutArchive(afw.outConn);
             }
         }
         private SendQueue sendQueue;
@@ -302,39 +331,29 @@ public class SimConn {
             super();
             this.iid = iid;
             this.tag = tag;
-            this.logDir = "/tmp/log/log" + initTime + "/" + tag;
+            this.logDir = "/tmp/log/log" + dateFormatter.format(java.time.Instant.ofEpochMilli(initTime)) + "/";
             if (!Files.exists(Paths.get(logDir)) && !new File(logDir).mkdirs()) {
                 LOG.error("Failed to create dirs: {}", logDir);
                 System.exit(-1);
             }
-            changeFile();
-            beginTs = System.currentTimeMillis();
-            interval = warmupDelay;
-            sendQueue = new SendQueue(initTime, queueSize);
+            // Every put message will have timestamp larger than current,
+            // and so larger than fileBeginTs
+            queueBeginTs = fileBeginTs = getCurrentBeginTs();
+            sendQueue = new SendQueue(fileBeginTs, queueSize, this);
             immutableSendQueues = new ArrayBlockingQueue<>(4);
+            state = NOT_READY;
         }
 
-        public void changeFile() {
-            String formatTime = dateFormatter.format(ZonedDateTime.now());
-            Path path = Paths.get(this.logDir, String.format("messages.%s.%s.data", iid, formatTime));
-            try {
-                outConn = new BufferedOutputStream(Files.newOutputStream(path), 8192);
-            } catch (IOException e) {
-                LOG.info(e.toString());
-                System.exit(1);
-            }
-            metaFilePath = Paths.get(this.logDir, String.format("messages.%s.%s.meta", iid, formatTime));
-            updateOutArchive(outConn);
-            LOG.info("use next filepath: {}", path);
-        }
-
-        // There should be only one thread calling this.
-        @Override
-        public void put(SimConnMessage m) {
+        public long getCurrentBeginTs() {
             long current = System.currentTimeMillis();
-            if (beginTs + interval < current) {
-                beginTs = current;
-                interval = filePeriod;
+            return interval * ((current - initTime) / interval) + initTime;
+        }
+
+        @Override
+        public synchronized void put(SimConnMessage m) {
+            long current = m.timestamp;
+            if (queueBeginTs + interval < current || m.simConnMessageType == SimConnMessage.TIMEOUT_TYPE) {
+                queueBeginTs = current;
                 // Set the `prevSendQueue`
                 int lastSize = sendQueue.queue.size();
                 try {
@@ -344,49 +363,65 @@ public class SimConn {
                     LOG.error("Shouldn't be interrupted");
                     System.exit(-1);
                 }
-                sendQueue = new SendQueue(dateFormatter.format(ZonedDateTime.now()), lastSize);
+                sendQueue = new SendQueue(queueBeginTs, lastSize, this);
             }
-            sendQueue.queue.add(m);
+            if (m.simConnMessageType != SimConnMessage.TIMEOUT_TYPE) {
+                sendQueue.queue.add(m);
+            }
+        }
+
+        public void writeSendQueue(SendQueue sendQueue) throws IOException {
+            // Start writing
+            int size = sendQueue.queue.size();
+            LOG.info("\033[1;32m{} start writing {} to {}\033[0m", tag, size, sendQueue.dataPath.toString());
+            long begin = System.currentTimeMillis();
+            sendQueue.queue.stream().forEach(m -> {
+                try {
+                    msgCount++;
+                    outArchive.writeInt(m.simConnMessageType, "");
+                    m.serialize(outArchive, "packet");
+                } catch (IOException e) {
+                    LOG.error(e.toString());
+                    System.exit(1);
+                }
+            });
+            // Write meta
+            FileWriter metaWriter = new FileWriter(sendQueue.metaPath.toFile());
+            metaWriter.write(String.format("%d\n%d\n", startMsgCount, msgCount));
+            startMsgCount = msgCount;
+            metaWriter.close();
+
+            LOG.info("\033[1;32m{} done writing {}, takes {}\033[0m", tag, size, (System.currentTimeMillis()-begin)/1000);
         }
 
         @Override
         public void run() {
-            long startMsgCount = 0;
+            state = RUNNING;
             try {
-                Thread.sleep(warmupDelay);
-                while (true) {
-                    SendQueue sendQueue = immutableSendQueues.take();
-                    int size = sendQueue.queue.size();
-                    LOG.info("\033[1;32m{} start writing {}\033[0m", tag, size);
-                    long begin = System.currentTimeMillis();
-                    // while (!sendQueue.queue.isEmpty()) {
-                    //     SimConnMessage m = sendQueue.queue.remove(0);
-                    //     msgCount++;
-                    //     outArchive.writeInt(m.simConnMessageType, "");
-                    //     m.serialize(outArchive, "packet");
-                    // }
-                    sendQueue.queue.stream().forEach(m -> {
-                        msgCount++;
-                        try {
-                            outArchive.writeInt(m.simConnMessageType, "");
-                            m.serialize(outArchive, "packet");
-                        } catch (IOException e) {
-                            LOG.error(e.toString());
-                            System.exit(1);
+                while (state == RUNNING) {
+                    SendQueue sendQueue = null;
+                    while (sendQueue == null && state == RUNNING) {
+                        sendQueue = immutableSendQueues.poll(2, TimeUnit.SECONDS);
+                        // This guarantees that if RUNNING, this thread can notify the master
+                        // thread about the timeslot timeout if the master thread doesn't
+                        // receive anything since timeslot timeout.
+                        if (System.currentTimeMillis() - fileBeginTs > interval) {
+                            put(new SimConnMessage(System.currentTimeMillis(), SimConnMessage.TIMEOUT_TYPE));
+                            fileBeginTs += interval;
                         }
-                    });
-                    FileWriter metaWriter = new FileWriter(metaFilePath.toFile());
-                    metaWriter.write(String.format("%d\n%d\n", startMsgCount, msgCount));
-                    startMsgCount = msgCount;
-                    metaWriter.close();
-                    changeFile();
-                    LOG.info("\033[1;32m{} done writing {}, takes {}\033[0m", tag, size, (System.currentTimeMillis()-begin)/1000);
+                    }
+                    if (sendQueue != null) {
+                        writeSendQueue(sendQueue);
+                    }
                 }
+                flush();
+                state = SHUTDOWN;
             } catch (ConcurrentModificationException e) {
                 LOG.error("\033[1;31m{} encountered ConcurrentModificationException\033[0m", tag);
                 System.exit(-1);
             } catch (InterruptedException e) {
                 LOG.info("SimConn ({}) exited due to InterruptedException", tag);
+                System.exit(-1);
             } catch (IOException e) {
                 LOG.error(e.toString());
                 System.exit(1);
@@ -394,7 +429,23 @@ public class SimConn {
         }
 
         @Override
-        public void flush() throws IOException {
+        protected void flush() throws IOException {
+            try {
+                immutableSendQueues.put(sendQueue);
+                sendQueue = null;
+            } catch (InterruptedException e) {
+                LOG.error("Flushing sendQueue to immutableSendQueues interrupted.");
+                System.exit(-1);
+            }
+            while (!immutableSendQueues.isEmpty()) {
+                try {
+                    SendQueue sendQueue = immutableSendQueues.take();
+                    writeSendQueue(sendQueue);
+                } catch (InterruptedException e) {
+                    LOG.error("Flushing immutableSendQueues interrupted.");
+                    System.exit(-1);
+                }
+            }
             outConn.flush();
         }
     }
@@ -506,6 +557,30 @@ public class SimConn {
         } catch (IOException e) {
             LOG.error(e.toString());
             System.exit(-1);
+        }
+    }
+
+    public void stop() {
+        if (enabled()) {
+            asyncSender.put(new SimConnMessage(SimConnMessage.TIMEOUT_TYPE));
+            asyncSender.state = AsyncSender.STOPPING;
+        }
+    }
+
+    public void shutdown() {
+        if (enabled()) {
+            if (asyncSender.state != AsyncSender.STOPPING) {
+                LOG.error("Should stop before shutdown.");
+                System.exit(-1);
+            }
+            try {
+                while (asyncSender.state != AsyncSender.SHUTDOWN) {
+                    Thread.sleep(1000);
+                }
+            } catch (InterruptedException e) {
+                LOG.error("Waiting for writing done is interrupted.");
+                System.exit(-1);
+            }
         }
     }
 
