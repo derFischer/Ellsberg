@@ -222,7 +222,15 @@ public class QuorumPeerMain {
             }
 
             quorumPeer.simConn = new SimConn();
-            quorumPeer.simConn.init(quorumPeer.getMyId());
+            // quorumPeer.simConnLocalQueueRecvReq = new SimConn.LocalQueue(quorumPeer.simConn);
+            // quorumPeer.simConnLocalQueueSendResp = new SimConn.LocalQueue(quorumPeer.simConn);
+            quorumPeer.simConnRecvReq = new SimConn();
+            quorumPeer.simConnSendResp = new SimConn();
+            quorumPeer.simConnAck = new SimConn();
+            quorumPeer.simConn.init(quorumPeer.getMyId(), "simConn");
+            quorumPeer.simConnRecvReq.init(quorumPeer.getMyId(), "recvreq");
+            quorumPeer.simConnSendResp.init(quorumPeer.getMyId(), "sendresp");
+            quorumPeer.simConnAck.init(quorumPeer.getMyId(), "ack");
 
             quorumPeer.start();
             ZKAuditProvider.addZKStartStopAuditLog();

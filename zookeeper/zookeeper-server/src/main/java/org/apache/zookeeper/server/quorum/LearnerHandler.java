@@ -497,6 +497,7 @@ public class LearnerHandler extends ZooKeeperThread {
                 this.sid = learnerMaster.getAndDecrementFollowerCounter();
             }
 
+            this.simConn.init(simConn.myid, String.format("handler.%d", getSid()));
             // sending() leader recv FOLLOWERINFO (CEPOCH)
             if (simConn.enabled()) {
                 simConn.request(new SimConn.RecordSimConnMessage(getSid(), false, qp));
@@ -899,6 +900,17 @@ public class LearnerHandler extends ZooKeeperThread {
                 Iterator<Proposal> itr = db.getCommittedLog().iterator();
                 currentZxid = queueCommittedProposals(itr, peerLastZxid, null, maxCommittedLog);
                 needSnap = false;
+                //
+                // queueOpPacket(Leader.DIFF, maxCommittedLog);
+                // for (Proposal propose : db.getCommittedLog()) {
+                //     if (propose.packet.getZxid() > peerLastZxid) {
+                //         queuePacket(propose.packet);
+                //         QuorumPacket qcommit = new QuorumPacket(Leader.COMMIT, propose.packet.getZxid(),
+                //                 null, null);
+                //         queuePacket(qcommit);
+                //     }
+                // }
+                // needSnap = false;
             } else if (peerLastZxid < minCommittedLog && txnLogSyncEnabled) {
                 // Use txnlog and committedLog to sync
 
@@ -1082,6 +1094,9 @@ public class LearnerHandler extends ZooKeeperThread {
             LOG.warn("Ignoring unexpected exception", e);
         }
 
+        this.simConn.flush();
+        this.simConn.asyncSender.interrupt();
+
         closeSocket();
 
         this.interrupt();
@@ -1219,6 +1234,6 @@ public class LearnerHandler extends ZooKeeperThread {
 
     public SimConn simConn;
     public void setSimConn(SimConn simConn) {
-        this.simConn = simConn;
+        this.simConn = new SimConn(); // Will init in `run()` after knowing follower id.
     }
 }

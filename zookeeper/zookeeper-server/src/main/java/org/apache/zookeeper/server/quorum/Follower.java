@@ -120,8 +120,8 @@ public class Follower extends Learner {
                     om = null;
                 }
                 // create a reusable packet to reduce gc impact
-                QuorumPacket qp = new QuorumPacket();
                 while (this.isRunning()) {
+                    QuorumPacket qp = new QuorumPacket();
                     readPacket(qp);
                     // sending() follower recv a package.
                     processPacket(qp);

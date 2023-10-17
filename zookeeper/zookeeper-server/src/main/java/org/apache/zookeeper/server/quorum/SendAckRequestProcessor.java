@@ -48,7 +48,7 @@ public class SendAckRequestProcessor implements RequestProcessor, Flushable {
                 // sending() follower reply PROPOSAL with ACK
                 // TODO: this is a big hack...
                 if (learner.simConn.enabled()) {
-                    learner.simConn.request(new SimConn.RecordSimConnMessage(learner.findLeader().getId(), true, qp));
+                    learner.zk.simConnAck.request(new SimConn.RecordSimConnMessage(learner.findLeader().getId(), true, qp));
                 }
             } catch (IOException e) {
                 LOG.warn("Closing connection to leader, exception during packet send", e);
