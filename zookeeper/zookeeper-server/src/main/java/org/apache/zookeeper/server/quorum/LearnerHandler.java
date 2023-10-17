@@ -497,9 +497,10 @@ public class LearnerHandler extends ZooKeeperThread {
                 this.sid = learnerMaster.getAndDecrementFollowerCounter();
             }
 
+            this.simConn.init(simConn.myid, String.format("handler.%d", getSid()));
             // sending() leader recv FOLLOWERINFO (CEPOCH)
             if (simConn.enabled()) {
-                simConn.request(new SimConn.RecordSimConnMessage(getSid(), qp, null));
+                simConn.request(new SimConn.RecordSimConnMessage(getSid(), false, qp));
             }
 
             String followerInfo = learnerMaster.getPeerInfo(this.sid);
@@ -541,7 +542,7 @@ public class LearnerHandler extends ZooKeeperThread {
                 bufferedOutput.flush();
                 // sending() leader send LAEDERINFO (NEWEPOCH)
                 if (simConn.enabled()) {
-                    simConn.request(new SimConn.RecordSimConnMessage(getSid(), null, newEpochPacket));
+                    simConn.request(new SimConn.RecordSimConnMessage(getSid(), true, newEpochPacket));
                 }
                 QuorumPacket ackEpochPacket = new QuorumPacket();
                 ia.readRecord(ackEpochPacket, "packet");
@@ -552,7 +553,7 @@ public class LearnerHandler extends ZooKeeperThread {
                 }
                 // sending() leader recv ACK-E
                 if (simConn.enabled()) {
-                    simConn.request(new SimConn.RecordSimConnMessage(getSid(), ackEpochPacket, null));
+                    simConn.request(new SimConn.RecordSimConnMessage(getSid(), false, ackEpochPacket));
                 }
                 ByteBuffer bbepoch = ByteBuffer.wrap(ackEpochPacket.getData());
                 ss = new StateSummary(bbepoch.getInt(), ackEpochPacket.getZxid());
@@ -613,7 +614,7 @@ public class LearnerHandler extends ZooKeeperThread {
                 QuorumPacket newLeaderQP = new QuorumPacket(Leader.NEWLEADER, newLeaderZxid, learnerMaster.getQuorumVerifierBytes(), null);
                 // sending() leader send NEWLEADER
                 if (simConn.enabled()) {
-                    simConn.request(new SimConn.RecordSimConnMessage(getSid(), null, newLeaderQP));
+                    simConn.request(new SimConn.RecordSimConnMessage(getSid(), true, newLeaderQP));
                 }
                 queuedPackets.add(newLeaderQP);
             }
@@ -637,7 +638,7 @@ public class LearnerHandler extends ZooKeeperThread {
             }
             // sending() leader recv ACKLD
             if (simConn.enabled()) {
-                simConn.request(new SimConn.RecordSimConnMessage(getSid(), qp, null));
+                simConn.request(new SimConn.RecordSimConnMessage(getSid(), false, qp));
             }
 
             LOG.debug("Received NEWLEADER-ACK message from {}", sid);
@@ -670,7 +671,7 @@ public class LearnerHandler extends ZooKeeperThread {
             QuorumPacket uptodate = new QuorumPacket(Leader.UPTODATE, -1, null, null);
             // sending() leader send UPTODATE (TOCHECK: maybe same as COMMIT-LD)
             if (simConn.enabled()) {
-                simConn.request(new SimConn.RecordSimConnMessage(getSid(), null, uptodate));
+                simConn.request(new SimConn.RecordSimConnMessage(getSid(), true, uptodate));
             }
             queuedPackets.add(uptodate);
 
@@ -681,7 +682,7 @@ public class LearnerHandler extends ZooKeeperThread {
                 // sending() leader recv ack/ping/revalidate/request
                 if (simConn.enabled()) {
                     if (qp.getType() != Leader.PING) {
-                        simConn.request(new SimConn.RecordSimConnMessage(getSid(), qp, null));
+                        simConn.request(new SimConn.RecordSimConnMessage(getSid(), false, qp));
                     }
                 }
 
@@ -899,6 +900,17 @@ public class LearnerHandler extends ZooKeeperThread {
                 Iterator<Proposal> itr = db.getCommittedLog().iterator();
                 currentZxid = queueCommittedProposals(itr, peerLastZxid, null, maxCommittedLog);
                 needSnap = false;
+                //
+                // queueOpPacket(Leader.DIFF, maxCommittedLog);
+                // for (Proposal propose : db.getCommittedLog()) {
+                //     if (propose.packet.getZxid() > peerLastZxid) {
+                //         queuePacket(propose.packet);
+                //         QuorumPacket qcommit = new QuorumPacket(Leader.COMMIT, propose.packet.getZxid(),
+                //                 null, null);
+                //         queuePacket(qcommit);
+                //     }
+                // }
+                // needSnap = false;
             } else if (peerLastZxid < minCommittedLog && txnLogSyncEnabled) {
                 // Use txnlog and committedLog to sync
 
@@ -1051,7 +1063,7 @@ public class LearnerHandler extends ZooKeeperThread {
             queuePacket(propose.packet);
             // sending() leader send proposal (SYNC stage)
             if (simConn.enabled()) {
-                simConn.request(new SimConn.RecordSimConnMessage(getSid(), null, propose.packet));
+                simConn.request(new SimConn.RecordSimConnMessage(getSid(), true, propose.packet));
             }
             queueOpPacket(Leader.COMMIT, packetZxid);
             queuedZxid = packetZxid;
@@ -1081,6 +1093,9 @@ public class LearnerHandler extends ZooKeeperThread {
         } catch (InterruptedException e) {
             LOG.warn("Ignoring unexpected exception", e);
         }
+
+        this.simConn.flush();
+        this.simConn.asyncSender.interrupt();
 
         closeSocket();
 
@@ -1123,7 +1138,7 @@ public class LearnerHandler extends ZooKeeperThread {
         queuePacket(packet);
         // sending() leader send DIFF/TRUNC/SNAP/COMMIT (SYNC stage)
         if (simConn.enabled()) {
-            simConn.request(new SimConn.RecordSimConnMessage(getSid(), null, packet));
+            simConn.request(new SimConn.RecordSimConnMessage(getSid(), true, packet));
         }
     }
 
@@ -1219,6 +1234,6 @@ public class LearnerHandler extends ZooKeeperThread {
 
     public SimConn simConn;
     public void setSimConn(SimConn simConn) {
-        this.simConn = simConn;
+        this.simConn = new SimConn(); // Will init in `run()` after knowing follower id.
     }
 }

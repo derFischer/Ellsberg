@@ -501,9 +501,13 @@ public class Learner {
         writePacket(qp, true);
         // sending() learner send FOLLOWERINFO
         if (simConn.enabled()) {
-            simConn.request(new SimConn.RecordSimConnMessage(self.getCurrentVote().getId(), null, qp));
+            simConn.request(new SimConn.RecordSimConnMessage(self.getCurrentVote().getId(), true, qp));
         }
         readPacket(qp);
+        // sending() learner recv LEADERINFO (reply later)
+        if (simConn.enabled()) {
+            simConn.request(new SimConn.RecordSimConnMessage(self.getCurrentVote().getId(), false, qp));
+        }
         final long newEpoch = ZxidUtils.getEpochFromZxid(qp.getZxid());
         if (qp.getType() == Leader.LEADERINFO) {
             // we are connected to a 1.0 server so accept the new epoch and read the next packet
@@ -528,7 +532,7 @@ public class Learner {
             QuorumPacket ackNewEpoch = new QuorumPacket(Leader.ACKEPOCH, lastLoggedZxid, epochBytes, null);
             // sending() learner reply LEADERINFO with ACKEPOCH
             if (simConn.enabled()) {
-                simConn.request(new SimConn.RecordSimConnMessage(self.getCurrentVote().getId(), qp, ackNewEpoch));
+                simConn.request(new SimConn.RecordSimConnMessage(self.getCurrentVote().getId(), true, ackNewEpoch));
             }
             writePacket(ackNewEpoch, true);
             return ZxidUtils.makeZxid(newEpoch, 0);
@@ -565,7 +569,7 @@ public class Learner {
         readPacket(qp);
         // sending() learner recv DIFF/SNAP/TRUNC
         if (simConn.enabled()) {
-            simConn.request(new SimConn.RecordSimConnMessage(self.getLeaderId(), qp, null));
+            simConn.request(new SimConn.RecordSimConnMessage(self.getLeaderId(), false, qp));
         }
         Deque<Long> packetsCommitted = new ArrayDeque<>();
         Deque<PacketInFlight> packetsNotCommitted = new ArrayDeque<>();
@@ -639,7 +643,7 @@ public class Learner {
                 case Leader.PROPOSAL:
                     // sending() learner recv PROPOSAL (SYNC stage)
                     if (simConn.enabled()) {
-                        simConn.request(new SimConn.RecordSimConnMessage(self.getLeaderId(), qp, null));
+                        simConn.request(new SimConn.RecordSimConnMessage(self.getLeaderId(), false, qp));
                     }
                     PacketInFlight pif = new PacketInFlight();
                     logEntry = SerializeUtils.deserializeTxn(qp.getData());
@@ -666,7 +670,7 @@ public class Learner {
                 case Leader.COMMITANDACTIVATE:
                     // sending() learner recv COMMIT (SYNC stage)
                     if (simConn.enabled()) {
-                        simConn.request(new SimConn.RecordSimConnMessage(self.getLeaderId(), qp, null));
+                        simConn.request(new SimConn.RecordSimConnMessage(self.getLeaderId(), false, qp));
                     }
                     pif = packetsNotCommitted.peekFirst();
                     if (pif.hdr.getZxid() == qp.getZxid() && qp.getType() == Leader.COMMITANDACTIVATE) {
@@ -735,6 +739,10 @@ public class Learner {
 
                     break;
                 case Leader.UPTODATE:
+                    // sending() learner recv UPTODATE (will reply later)
+                    if (simConn.enabled()) {
+                        simConn.request(new SimConn.RecordSimConnMessage(self.getLeaderId(), false, qp));
+                    }
                     LOG.info("Learner received UPTODATE message");
                     if (newLeaderQV != null) {
                         boolean majorChange = self.processReconfig(newLeaderQV, null, null, true);
@@ -750,6 +758,10 @@ public class Learner {
                     self.adminServer.setZooKeeperServer(zk);
                     break outerLoop;
                 case Leader.NEWLEADER: // Getting NEWLEADER here instead of in discovery
+                    // sending() learner recv LEADERINFO (will reply later)
+                    if (simConn.enabled()) {
+                        simConn.request(new SimConn.RecordSimConnMessage(self.getLeaderId(), false, qp));
+                    }
                     // means this is Zab 1.0
                     LOG.info("Learner received NEWLEADER message");
                     if (qp.getData() != null && qp.getData().length > 1) {
@@ -787,7 +799,7 @@ public class Learner {
                     writePacket(ackld, true);
                     // sending() learner reply NEWLEADER with ACKLD
                      if (simConn.enabled()) {
-                         simConn.request(new SimConn.RecordSimConnMessage(self.getLeaderId(), qp, ackld));
+                         simConn.request(new SimConn.RecordSimConnMessage(self.getLeaderId(), true, ackld));
                      }
                     break;
                 }
@@ -795,8 +807,9 @@ public class Learner {
         }
         ack.setZxid(ZxidUtils.makeZxid(newEpoch, 0));
         writePacket(ack, true);
+        // sending() learner reply UPTODATE with ACK
         if (simConn.enabled()) {
-            simConn.request(new SimConn.RecordSimConnMessage(self.getLeaderId(), qp, ack));
+            simConn.request(new SimConn.RecordSimConnMessage(self.getLeaderId(), true, ack));
         }
         zk.startServing();
         /*

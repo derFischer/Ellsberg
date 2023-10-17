@@ -16,30 +16,37 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Arrays;
-import java.util.Timer;
-import java.util.TimerTask;
+import java.util.*;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.LinkedTransferQueue;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class SimConn {
     public static boolean enabled = false;
+    final static public DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+    final public static String initTime = dateFormatter.format(ZonedDateTime.now());
 
-    public static interface SimConnMessage extends Record {
-        long length();
-    }
+    public static class SimConnMessage implements Record {
+        final public static int TIMEOUT_TYPE = 0;
+        final public static int BYTES_TYPE = 1;
+        final public static int QP_TYPE = 2;
+        final public static int HDR_TYPE = 3;
+        final int simConnMessageType;
+        long timestamp;
 
-    public static class TimeoutMessage implements SimConnMessage {
+        public SimConnMessage() {
+            simConnMessageType = -1;
+        }
+
         @Override
         public void serialize(OutputArchive archive, String tag) throws IOException {}
-
         @Override
         public void deserialize(InputArchive archive, String tag) throws IOException {}
-        public long length() { return -1; }
     }
-
-    public static TimeoutMessage timeoutMessage = new TimeoutMessage();
 
     public static final int NOT = 0x10000000;
     public static final int CLIENTREQ = 0x10000001;
@@ -47,119 +54,95 @@ public class SimConn {
     public static final int CLIENTRO = 0x10000003;
     public static final int CLIENTRORESP = 0x10000004;
 
-    public static class RecordSimConnMessage implements SimConnMessage {
+    public static class RecordSimConnMessage extends SimConnMessage {
         protected static final Logger LOG = LoggerFactory.getLogger(SimConnMessage.class);
-        final static byte[] emptyByteArray = new byte[]{};
+        int simConnMessageType = -1;
         boolean isSend;
         long peerId;
         // not | qp
-        int recvType = -1;
-        int sendType = -1;
-        Record recv;
-        Record send;
+        int type = -1;
+        Record record;
 
-        byte[] recvBytes;
-        byte[] sendBytes;
-
-        byte[] quorumPacketToBytes(Record qp) {
-            if (qp == null) {
-                return emptyByteArray;
-            }
-            ByteArrayOutputStream s = new ByteArrayOutputStream();
-            try {
-                DataOutputStream ds = new DataOutputStream(s);
-                BinaryOutputArchive outputArchive = new BinaryOutputArchive(ds);
-                qp.serialize(outputArchive, "qp");
-                ds.flush();
-                return s.toByteArray();
-            } catch (java.io.IOException e) {
-                LOG.error(e.toString());
-                System.exit(1);
-            }
-            return null;
+        public int getSimConnMessageType() {
+            return simConnMessageType;
         }
 
-        public RecordSimConnMessage() {}
+        public RecordSimConnMessage(int simConnMessageType) {
+            this.simConnMessageType = simConnMessageType;
+            timestamp = System.currentTimeMillis();
+        }
 
         static public RecordSimConnMessage createForClientReq(long peerId, TxnHeader hdr, boolean isReadOnly) {
-            RecordSimConnMessage m = new RecordSimConnMessage();
+            RecordSimConnMessage m = new RecordSimConnMessage(HDR_TYPE);
             if (!enabled) return m;
             m.isSend = false;
             m.peerId = peerId;
             if (!isReadOnly) {
-                m.recvType = CLIENTREQ;
+                m.type = CLIENTREQ;
             } else {
-                m.recvType = CLIENTRO;
+                m.type = CLIENTRO;
             }
-            m.send = null;
-            m.recv = hdr;
+            m.record = hdr;
             return m;
         }
         static public RecordSimConnMessage createForClientResp(long peerId, TxnHeader hdr, boolean isReadOnly) {
-            RecordSimConnMessage m = new RecordSimConnMessage();
+            RecordSimConnMessage m = new RecordSimConnMessage(HDR_TYPE);
             if (!enabled) return m;
             m.isSend = true;
             m.peerId = peerId;
             if (!isReadOnly) {
-                m.sendType = CLIENTRESP;
+                m.type = CLIENTRESP;
             } else {
-                m.sendType = CLIENTRORESP;
+                m.type = CLIENTRORESP;
             }
-            m.send = hdr;
-            m.recv = null;
+            m.record = hdr;
             return m;
         }
 
-        public RecordSimConnMessage(long peerId, QuorumPacket recv, QuorumPacket send) {
+        public RecordSimConnMessage(long peerId, boolean isSend, QuorumPacket qp) {
             if (!enabled) return;
-            assert (recv != null || send != null);
-            this.isSend = send != null;
+            assert (qp != null);
+            simConnMessageType = QP_TYPE;
+            timestamp = System.currentTimeMillis();
+            this.isSend = isSend;
             this.peerId = peerId;
-            if (recv != null) {
-                this.recvType = recv.getType();
-            }
-            if (send != null) {
-                this.sendType = send.getType();
-            }
-            this.recv = recv;
-            this.send = send;
+            this.type = qp.getType();
+            this.record = qp;
         }
 
         public void serialize(OutputArchive a_, String tag) throws java.io.IOException {
-            if (recvBytes == null) {
-                recvBytes = quorumPacketToBytes(recv);
-            }
-            if (sendBytes == null) {
-                sendBytes = quorumPacketToBytes(send);
-            }
             a_.startRecord(this,tag);
+            a_.writeLong(timestamp, "");
             a_.writeBool(isSend, "");
             a_.writeLong(peerId, "");
-            a_.writeInt(recvType, "");
-            a_.writeInt(sendType, "");
-            a_.writeBuffer(recvBytes, "");
-            a_.writeBuffer(sendBytes, "");
+            a_.writeInt(type, "");
+            a_.writeRecord(record, "");
             a_.endRecord(this, tag);
         }
 
-        public void deserialize(InputArchive archive, String tag) throws java.io.IOException {
-            LOG.error("deserialize not implemented");
-            System.exit(1);
+        public void deserialize(InputArchive a_, String tag) throws java.io.IOException {
+            a_.startRecord(tag);
+            timestamp = a_.readLong("");
+            isSend = a_.readBool("");
+            peerId = a_.readLong("");
+            type = a_.readInt("");
+            if (getSimConnMessageType() == QP_TYPE) {
+                record = new QuorumPacket();
+            } else {
+                assert (getSimConnMessageType() == HDR_TYPE);
+                record = new TxnHeader();
+            }
+            a_.readRecord(record, "");
+            a_.endRecord(tag);
         }
 
-        public long length() {
-            if (recvBytes == null) {
-                recvBytes = quorumPacketToBytes(recv);
-            }
-            if (sendBytes == null) {
-                sendBytes = quorumPacketToBytes(send);
-            }
-            return 1 + 8 + 4 + 4 + (4+recvBytes.length) + (4+sendBytes.length);
+        public String toString() {
+            return String.format("ts=%d, %s, peer=%d, type=%d, record=%s", timestamp, isSend, peerId, type, record);
         }
     }
+    // End of RecordSimConnMessage
 
-    public static class BytesSimConnMessage implements SimConnMessage {
-
+    public static class BytesSimConnMessage extends SimConnMessage {
         protected static final Logger LOG = LoggerFactory.getLogger(SimConnMessage.class);
         final static byte[] emptyByteArray = new byte[]{};
         boolean isSend;
@@ -170,11 +153,16 @@ public class SimConn {
         byte[] recv;
         byte[] send;
 
-        public BytesSimConnMessage() {}
+        long timestamp;
+
+        public BytesSimConnMessage() {
+            timestamp = System.currentTimeMillis();
+        }
 
         public BytesSimConnMessage(long peerId, int type, byte[] recv, byte[] send) {
             if (!enabled) return;
             assert (recv != null || send != null);
+            timestamp = System.currentTimeMillis();
             this.isSend = send != null;
             this.peerId = peerId;
             if (recv == null) {
@@ -195,6 +183,7 @@ public class SimConn {
 
         public void serialize(OutputArchive a_, String tag) throws java.io.IOException {
             a_.startRecord(this,tag);
+            a_.writeLong(timestamp, "");
             a_.writeBool(isSend, "");
             a_.writeLong(peerId, "");
             a_.writeInt(recvType, "");
@@ -204,15 +193,22 @@ public class SimConn {
             a_.endRecord(this, tag);
         }
 
-        public void deserialize(InputArchive archive, String tag) throws java.io.IOException {
-            LOG.error("deserialize not implemented");
-            System.exit(1);
-        }
-
-        public long length() {
-            return 1 + 8 + 4 + 4 + (4+recv.length) + (4+send.length);
+        public void deserialize(InputArchive a_, String tag) throws java.io.IOException {
+            a_.startRecord(tag);
+            timestamp = a_.readLong("");
+            isSend = a_.readBool("");
+            peerId = a_.readLong("");
+            recvType = a_.readInt("");
+            sendType = a_.readInt("");
+            recv = a_.readBuffer("");
+            send = a_.readBuffer("");
+            a_.endRecord(tag);
         }
     }
+    // End of BytesSimConnMessage
+
+
+    protected static final Logger LOG = LoggerFactory.getLogger(SimConn.class);
 
     private enum MODE {
         NONE,
@@ -227,37 +223,15 @@ public class SimConn {
         PIPE
     }
 
-
-    MODE mode;
-    CONNTYPE conntype;
-
-
-    // Just in case we may need it.
-    private long iid;
-    private long myid;
-
-    // NOTE: Don't directly use inConn/outConn, but use inArchive/outArchive
-    private InputStream inConn;
-    private OutputStream outConn;
-
-    private InputArchive inArchive;
-    private OutputArchive outArchive;
-
-    final private ReentrantLock lock;
-
-    // TODO: FILE MODE related
-
-    protected static final Logger LOG = LoggerFactory.getLogger(SimConn.class);
-
     public static class AsyncSender extends Thread {
         // Note that BlockingQueue is thread-safe, we don't need additional lock.
-        protected final LinkedBlockingQueue<SimConnMessage> sendQueue;
+        private LinkedBlockingQueue<SimConnMessage> sendQueue;
         protected OutputStream outConn;
         protected OutputArchive outArchive;
         public long msgCount;
 
         AsyncSender() {
-            this.sendQueue = new LinkedBlockingQueue<>(4096);
+            this.sendQueue = new LinkedBlockingQueue<>();
         }
         /*
          * Note that the `outConn` could even be a file stream
@@ -277,7 +251,7 @@ public class SimConn {
             while (true) {
                 try {
                     SimConnMessage m = sendQueue.take();
-                    outArchive.writeLong(m.length(), "length");
+                    outArchive.writeInt(m.simConnMessageType, "");
                     m.serialize(outArchive, "packet");
                 } catch (java.io.IOException | InterruptedException e) {
                     LOG.info(e.toString());
@@ -286,7 +260,7 @@ public class SimConn {
             }
         }
 
-        public void Put(SimConnMessage m) {
+        public void put(SimConnMessage m) {
             try {
                 sendQueue.put(m);
             } catch (InterruptedException e) {
@@ -295,95 +269,152 @@ public class SimConn {
             }
         }
 
-        public void writeOne(SimConnMessage m) {
-            msgCount++;
-            try {
-                outArchive.writeLong(m.length(), "length");
-                m.serialize(outArchive, "packet");
-            } catch (IOException e) {
-                LOG.error(e.toString());
-            }
+        public void flush() throws IOException {
+            outConn.flush();
         }
     }
+    // End of AsyncSender
 
     public static class AsyncFileWriter extends AsyncSender {
+        public static long warmupDelay = 10 * 1000L;
+        public static long filePeriod = 10 * 1000L;
+        public static int queueSize = 262144;
         public long iid;
+        public String tag;
         public String logDir;
         public Path metaFilePath;
 
-        final static private DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
-        AsyncFileWriter(long iid) {
+        public long beginTs;
+        public long interval;
+
+        public static class SendQueue {
+            public ArrayList<SimConnMessage> queue;
+            final public String date;
+            public SendQueue(String date, int size) {
+                this.date = date;
+                queue = new ArrayList<>(size);
+            }
+        }
+        private SendQueue sendQueue;
+        public ArrayBlockingQueue<SendQueue> immutableSendQueues;
+
+        AsyncFileWriter(long iid, String tag) {
             super();
             this.iid = iid;
-            String formateTime = dateFormatter.format(ZonedDateTime.now());
-            this.logDir = "/tmp/log/log" + formateTime;
-            new File(logDir).mkdirs();
+            this.tag = tag;
+            this.logDir = "/tmp/log/log" + initTime + "/" + tag;
+            if (!Files.exists(Paths.get(logDir)) && !new File(logDir).mkdirs()) {
+                LOG.error("Failed to create dirs: {}", logDir);
+                System.exit(-1);
+            }
             changeFile();
+            beginTs = System.currentTimeMillis();
+            interval = warmupDelay;
+            sendQueue = new SendQueue(initTime, queueSize);
+            immutableSendQueues = new ArrayBlockingQueue<>(4);
         }
 
         public void changeFile() {
-            String formateTime = dateFormatter.format(ZonedDateTime.now());
-            Path path = Paths.get(this.logDir, String.format("messages.%s.%s.data", iid, formateTime));
+            String formatTime = dateFormatter.format(ZonedDateTime.now());
+            Path path = Paths.get(this.logDir, String.format("messages.%s.%s.data", iid, formatTime));
             try {
                 outConn = new BufferedOutputStream(Files.newOutputStream(path), 8192);
             } catch (IOException e) {
                 LOG.info(e.toString());
                 System.exit(1);
             }
-            metaFilePath = Paths.get(this.logDir, String.format("messages.%s.%s.meta", iid, formateTime));
+            metaFilePath = Paths.get(this.logDir, String.format("messages.%s.%s.meta", iid, formatTime));
             updateOutArchive(outConn);
             LOG.info("use next filepath: {}", path);
         }
 
+        // There should be only one thread calling this.
+        @Override
+        public void put(SimConnMessage m) {
+            long current = System.currentTimeMillis();
+            if (beginTs + interval < current) {
+                beginTs = current;
+                interval = filePeriod;
+                // Set the `prevSendQueue`
+                int lastSize = sendQueue.queue.size();
+                try {
+                    immutableSendQueues.put(sendQueue);
+                    LOG.info("\033[1;31m{} putted, now {}\033[0m", tag, immutableSendQueues.size());
+                } catch (InterruptedException e) {
+                    LOG.error("Shouldn't be interrupted");
+                    System.exit(-1);
+                }
+                sendQueue = new SendQueue(dateFormatter.format(ZonedDateTime.now()), lastSize);
+            }
+            sendQueue.queue.add(m);
+        }
+
         @Override
         public void run() {
-            Runnable putTimeout = () -> this.Put(timeoutMessage);
-            TimerTask timeoutTask = new TimerTask() {
-                public void run() {
-                    putTimeout.run();
-                }
-            };
-
-            Timer timer = new Timer();
-            timer.schedule(timeoutTask, 30*1000L);
             long startMsgCount = 0;
-            while (true) {
-                try {
-                    SimConnMessage m = sendQueue.take();
-                    if (m == timeoutMessage) {
-                        outConn.flush();
-                        FileWriter metaWriter = new FileWriter(metaFilePath.toFile());
-                        metaWriter.write(String.format("%d\n%d\n", startMsgCount, msgCount));
-                        startMsgCount = msgCount;
-                        metaWriter.close();
-                        changeFile();
-                        timer = new Timer();
-                        timer.schedule(new TimerTask() {
-                                public void run() {
-                                    putTimeout.run();
-                                }
-                            },
-                            60*1000L
-                        );
-                        continue;
-                    }
-                    msgCount++;
-                    outArchive.writeLong(m.length(), "length");
-                    m.serialize(outArchive, "packet");
-                } catch (IOException | InterruptedException e) {
-                    LOG.error(e.toString());
-                    System.exit(1);
+            try {
+                Thread.sleep(warmupDelay);
+                while (true) {
+                    SendQueue sendQueue = immutableSendQueues.take();
+                    int size = sendQueue.queue.size();
+                    LOG.info("\033[1;32m{} start writing {}\033[0m", tag, size);
+                    long begin = System.currentTimeMillis();
+                    // while (!sendQueue.queue.isEmpty()) {
+                    //     SimConnMessage m = sendQueue.queue.remove(0);
+                    //     msgCount++;
+                    //     outArchive.writeInt(m.simConnMessageType, "");
+                    //     m.serialize(outArchive, "packet");
+                    // }
+                    sendQueue.queue.stream().forEach(m -> {
+                        msgCount++;
+                        try {
+                            outArchive.writeInt(m.simConnMessageType, "");
+                            m.serialize(outArchive, "packet");
+                        } catch (IOException e) {
+                            LOG.error(e.toString());
+                            System.exit(1);
+                        }
+                    });
+                    FileWriter metaWriter = new FileWriter(metaFilePath.toFile());
+                    metaWriter.write(String.format("%d\n%d\n", startMsgCount, msgCount));
+                    startMsgCount = msgCount;
+                    metaWriter.close();
+                    changeFile();
+                    LOG.info("\033[1;32m{} done writing {}, takes {}\033[0m", tag, size, (System.currentTimeMillis()-begin)/1000);
                 }
+            } catch (ConcurrentModificationException e) {
+                LOG.error("\033[1;31m{} encountered ConcurrentModificationException\033[0m", tag);
+                System.exit(-1);
+            } catch (InterruptedException e) {
+                LOG.info("SimConn ({}) exited due to InterruptedException", tag);
+            } catch (IOException e) {
+                LOG.error(e.toString());
+                System.exit(1);
             }
         }
-    }
 
-    private AsyncSender asyncSender;
-    public long msgCount;
-
-    public SimConn() {
-        this.lock = new ReentrantLock();
+        @Override
+        public void flush() throws IOException {
+            outConn.flush();
+        }
     }
+    // End of AsyncFileWriter
+
+    MODE mode;
+    CONNTYPE conntype;
+
+    // Just in case we may need it.
+    private long iid;
+    public long myid;
+    public String tag;
+
+    // NOTE: Don't directly use inConn/outConn, but use inArchive/outArchive
+    private InputStream inConn;
+    private OutputStream outConn;
+
+    public AsyncSender asyncSender;
+
+    public SimConn() {}
 
     public void setupEnv() {
         final String simmodeStr = System.getenv("SIMMODE");
@@ -401,7 +432,7 @@ public class SimConn {
             LOG.error("Unexpected simmode: " + simmodeStr);
             System.exit(1);
         }
-        
+
         final String simconntypeStr = System.getenv("SIMCONNTYPE");
         if (simconntypeStr == null) {
             this.conntype = CONNTYPE.PIPE;
@@ -421,10 +452,11 @@ public class SimConn {
         enabled = this.mode != MODE.NONE;
     }
 
-    public void init(final long myId) {
+    public void init(final long myId, final String tag) {
         this.setupEnv();
         this.myid = myId;
-        LOG.info("SimConn setup: mode={}, conntype={}, iid={}, myid={}", mode, conntype, iid, myid);
+        this.tag = tag;
+        LOG.info("SimConn({}) setup: mode={}, conntype={}, iid={}, myid={}", tag, mode, conntype, iid, myid);
 
         if (mode == MODE.NONE) {
             return;
@@ -436,9 +468,7 @@ public class SimConn {
                 String ctosPath = "/tmp/tmpPipe_c_to_s." + iid + ".pipe";
                 try {
                     outConn = Files.newOutputStream(Paths.get(ctosPath));
-                    outArchive = BinaryOutputArchive.getArchive(outConn);
                     inConn = Files.newInputStream(Paths.get(stocPath));
-                    inArchive = BinaryInputArchive.getArchive(inConn);
                 } catch (Exception e) {
                     LOG.error(e.toString());
                     System.exit(1);
@@ -449,30 +479,33 @@ public class SimConn {
             }
         }
 
-        // TODO: implement for SYNC and FILE
+        // TODO: implement for SYNC
         switch (this.mode) {
-        case ASYNC:
-            asyncSender = new AsyncSender(outConn);
-            asyncSender.start();
-            break;
-        case FILE:
-            asyncSender = new AsyncFileWriter(iid);
-            asyncSender.start();
-            break;
+            case ASYNC:
+                asyncSender = new AsyncSender(outConn);
+                asyncSender.start();
+                break;
+            case FILE:
+                asyncSender = new AsyncFileWriter(iid, tag);
+                asyncSender.start();
+                break;
         }
     }
 
     public void request(SimConnMessage m) {
         if (mode != MODE.NONE) {
             if (mode == MODE.ASYNC || mode == MODE.FILE) {
-                asyncSender.Put(m);
-                // try {
-                //     lock.lock();
-                //     asyncSender.writeOne(m);
-                // } finally {
-                //     lock.unlock();
-                // }
+                asyncSender.put(m);
             }
+        }
+    }
+
+    public void flush() {
+        try {
+            asyncSender.flush();
+        } catch (IOException e) {
+            LOG.error(e.toString());
+            System.exit(-1);
         }
     }
 

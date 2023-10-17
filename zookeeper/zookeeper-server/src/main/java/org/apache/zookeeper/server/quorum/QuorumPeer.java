@@ -1336,11 +1336,17 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
     public Leader leader;
     public Observer observer;
     public SimConn simConn;
+    public SimConn simConnSendResp;
+    public SimConn simConnRecvReq;
+    public SimConn simConnAck;
 
     protected Follower makeFollower(FileTxnSnapLog logFactory) throws IOException {
         Follower f = new Follower(this, new FollowerZooKeeperServer(logFactory, this, this.zkDb));
         f.setSimConn(simConn);
         f.zk.simConn = simConn;
+        f.zk.simConnSendResp = simConnSendResp;
+        f.zk.simConnRecvReq = simConnRecvReq;
+        f.zk.simConnAck = simConnAck;
         return f;
     }
 
@@ -1348,6 +1354,8 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
         Leader l = new Leader(this, new LeaderZooKeeperServer(logFactory, this, this.zkDb));
         l.setSimConn(simConn);
         l.zk.simConn = simConn;
+        l.zk.simConnSendResp = simConnSendResp;
+        l.zk.simConnRecvReq = simConnRecvReq;
         return l;
     }
 
@@ -1355,6 +1363,9 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
         Observer o = new Observer(this, new ObserverZooKeeperServer(logFactory, this, this.zkDb));
         o.setSimConn(simConn);
         o.zk.simConn = simConn;
+        o.zk.simConnSendResp = simConnSendResp;
+        o.zk.simConnRecvReq = simConnRecvReq;
+        o.zk.simConnAck = simConnAck;
         return o;
     }
 

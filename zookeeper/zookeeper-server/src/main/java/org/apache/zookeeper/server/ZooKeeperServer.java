@@ -2416,5 +2416,8 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
     }
 
     public SimConn simConn;
+    public SimConn simConnSendResp;
+    public SimConn simConnRecvReq;
+    public SimConn simConnAck;
 }
 
