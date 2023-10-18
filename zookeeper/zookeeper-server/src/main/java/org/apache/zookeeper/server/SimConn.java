@@ -273,7 +273,7 @@ public class SimConn {
     // End of AsyncSender
 
     public static class AsyncFileWriter extends AsyncSender {
-        public static long intervalMilli = 30_000L;
+        public static long intervalMilli = 20_000L;
         public static int queueSize = 262144;
         public long iid;
         public String tag;
