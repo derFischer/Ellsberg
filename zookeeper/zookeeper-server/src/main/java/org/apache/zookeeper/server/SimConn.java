@@ -353,7 +353,7 @@ public class SimConn {
         public synchronized void put(SimConnMessage m) {
             long current = m.timestamp;
             if (queueBeginTs + interval < current || m.simConnMessageType == SimConnMessage.TIMEOUT_TYPE) {
-                queueBeginTs = current;
+                queueBeginTs = queueBeginTs + interval;
                 // Set the `prevSendQueue`
                 int lastSize = sendQueue.queue.size();
                 try {
