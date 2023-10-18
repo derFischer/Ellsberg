@@ -27,14 +27,15 @@ import java.util.concurrent.locks.ReentrantLock;
 public class SimConn {
     public static boolean enabled = false;
     final static public DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneId.systemDefault());
-    static final public long initTime = System.currentTimeMillis();
+    static final public long initTimeMilli = System.currentTimeMillis();
+    static final public long initTimeNano = System.nanoTime();
 
     public static class SimConnMessage implements Record {
         final public static int TIMEOUT_TYPE = 0;
         final public static int BYTES_TYPE = 1;
         final public static int QP_TYPE = 2;
         final public static int HDR_TYPE = 3;
-        final int simConnMessageType;
+        int simConnMessageType;
         long timestamp;
 
         public SimConnMessage() {
@@ -63,7 +64,6 @@ public class SimConn {
 
     public static class RecordSimConnMessage extends SimConnMessage {
         protected static final Logger LOG = LoggerFactory.getLogger(SimConnMessage.class);
-        int simConnMessageType = -1;
         boolean isSend;
         long peerId;
         // not | qp
@@ -75,8 +75,8 @@ public class SimConn {
         }
 
         public RecordSimConnMessage(int simConnMessageType) {
-            this.simConnMessageType = simConnMessageType;
-            timestamp = System.currentTimeMillis();
+            super(simConnMessageType);
+            timestamp = System.nanoTime();
         }
 
         static public RecordSimConnMessage createForClientReq(long peerId, TxnHeader hdr, boolean isReadOnly) {
@@ -107,10 +107,10 @@ public class SimConn {
         }
 
         public RecordSimConnMessage(long peerId, boolean isSend, QuorumPacket qp) {
+            super(QP_TYPE);
             if (!enabled) return;
             assert (qp != null);
-            simConnMessageType = QP_TYPE;
-            timestamp = System.currentTimeMillis();
+            timestamp = System.nanoTime();
             this.isSend = isSend;
             this.peerId = peerId;
             this.type = qp.getType();
@@ -151,52 +151,37 @@ public class SimConn {
 
     public static class BytesSimConnMessage extends SimConnMessage {
         protected static final Logger LOG = LoggerFactory.getLogger(SimConnMessage.class);
-        final static byte[] emptyByteArray = new byte[]{};
+        long timestamp;
         boolean isSend;
         long peerId;
         // not | qp
-        int recvType = -1;
-        int sendType = -1;
-        byte[] recv;
-        byte[] send;
-
-        long timestamp;
+        int type = -1;
+        byte[] bytes;
 
         public BytesSimConnMessage() {
-            timestamp = System.currentTimeMillis();
+            super(BYTES_TYPE);
+            if (!enabled) return;
+            timestamp = System.nanoTime();
         }
 
-        public BytesSimConnMessage(long peerId, int type, byte[] recv, byte[] send) {
+        public BytesSimConnMessage(boolean isSend, long peerId, int type, byte[] bytes) {
+            super(BYTES_TYPE);
             if (!enabled) return;
-            assert (recv != null || send != null);
-            timestamp = System.currentTimeMillis();
-            this.isSend = send != null;
+            this.timestamp = System.nanoTime();
+            this.isSend = isSend;
             this.peerId = peerId;
-            if (recv == null) {
-                this.recv = emptyByteArray;
-                this.recvType = -1;
-            } else {
-                this.recv = recv;
-                this.recvType = type;
-            }
-            if (send == null) {
-                this.send = emptyByteArray;
-                this.sendType = -1;
-            } else {
-                this.send = send;
-                this.sendType = type;
-            }
+            this.type = type;
+            this.bytes = bytes;
         }
 
         public void serialize(OutputArchive a_, String tag) throws java.io.IOException {
+            LOG.info("BytesSimConnMessage bytes({}): {}", bytes.length, bytes);
             a_.startRecord(this,tag);
             a_.writeLong(timestamp, "");
             a_.writeBool(isSend, "");
             a_.writeLong(peerId, "");
-            a_.writeInt(recvType, "");
-            a_.writeInt(sendType, "");
-            a_.writeBuffer(recv, "");
-            a_.writeBuffer(send, "");
+            a_.writeInt(type, "");
+            a_.writeBuffer(bytes, "");
             a_.endRecord(this, tag);
         }
 
@@ -205,10 +190,8 @@ public class SimConn {
             timestamp = a_.readLong("");
             isSend = a_.readBool("");
             peerId = a_.readLong("");
-            recvType = a_.readInt("");
-            sendType = a_.readInt("");
-            recv = a_.readBuffer("");
-            send = a_.readBuffer("");
+            type = a_.readInt("");
+            bytes = a_.readBuffer("");
             a_.endRecord(tag);
         }
     }
@@ -233,8 +216,8 @@ public class SimConn {
     public static class AsyncSender extends Thread {
         // Note that BlockingQueue is thread-safe, we don't need additional lock.
         private final LinkedBlockingQueue<SimConnMessage> sendQueue;
-        protected OutputStream outConn;
-        protected OutputArchive outArchive;
+        private OutputStream outConn;
+        private OutputArchive outArchive;
         public long msgCount;
         final static public int NOT_READY = 0;
         final static public int RUNNING = 1;
@@ -254,7 +237,7 @@ public class SimConn {
             updateOutArchive(outConn);
         }
 
-        public void updateOutArchive(OutputStream outConn) {
+        private void updateOutArchive(OutputStream outConn) {
             this.outConn =  outConn;
             this.outArchive = BinaryOutputArchive.getArchive(outConn);
         }
@@ -290,7 +273,7 @@ public class SimConn {
     // End of AsyncSender
 
     public static class AsyncFileWriter extends AsyncSender {
-        public static long interval = 10 * 1_000L;
+        public static long intervalMilli = 30_000L;
         public static int queueSize = 262144;
         public long iid;
         public String tag;
@@ -314,14 +297,6 @@ public class SimConn {
                 timeSlotDir.toFile().mkdirs();
                 dataPath = Paths.get(timeSlotDir.toString(), String.format("messages.%s.%s.data", afw.iid, afw.tag));
                 metaPath = Paths.get(timeSlotDir.toString(), String.format("messages.%s.%s.meta", afw.iid, afw.tag));
-                try {
-                    afw.outConn = new BufferedOutputStream(Files.newOutputStream(dataPath), 8192);
-                } catch (IOException e) {
-                    LOG.info(e.toString());
-                    System.exit(1);
-                }
-                // Update outArchive
-                afw.updateOutArchive(afw.outConn);
             }
         }
         private SendQueue sendQueue;
@@ -331,7 +306,7 @@ public class SimConn {
             super();
             this.iid = iid;
             this.tag = tag;
-            this.logDir = "/tmp/log/log" + dateFormatter.format(java.time.Instant.ofEpochMilli(initTime)) + "/";
+            this.logDir = "/tmp/log/log" + dateFormatter.format(java.time.Instant.ofEpochMilli(initTimeMilli)) + "/";
             if (!Files.exists(Paths.get(logDir)) && !new File(logDir).mkdirs()) {
                 LOG.error("Failed to create dirs: {}", logDir);
                 System.exit(-1);
@@ -346,19 +321,18 @@ public class SimConn {
 
         public long getCurrentBeginTs() {
             long current = System.currentTimeMillis();
-            return interval * ((current - initTime) / interval) + initTime;
+            return intervalMilli * ((current - initTimeMilli) / intervalMilli) + initTimeMilli;
         }
 
         @Override
         public synchronized void put(SimConnMessage m) {
-            long current = m.timestamp;
-            if (queueBeginTs + interval < current || m.simConnMessageType == SimConnMessage.TIMEOUT_TYPE) {
-                queueBeginTs = queueBeginTs + interval;
+            if (queueBeginTs + intervalMilli - initTimeMilli < (m.timestamp - initTimeNano)/1_000_000L
+                    || m.simConnMessageType == SimConnMessage.TIMEOUT_TYPE) {
+                queueBeginTs = queueBeginTs + intervalMilli;
                 // Set the `prevSendQueue`
                 int lastSize = sendQueue.queue.size();
                 try {
                     immutableSendQueues.put(sendQueue);
-                    LOG.info("\033[1;31m{} putted, now {}\033[0m", tag, immutableSendQueues.size());
                 } catch (InterruptedException e) {
                     LOG.error("Shouldn't be interrupted");
                     System.exit(-1);
@@ -371,9 +345,11 @@ public class SimConn {
         }
 
         public void writeSendQueue(SendQueue sendQueue) throws IOException {
+            OutputStream outConn = new BufferedOutputStream(Files.newOutputStream(sendQueue.dataPath), 8192);
+            // Update outArchive
+            OutputArchive outArchive = BinaryOutputArchive.getArchive(outConn);
             // Start writing
             int size = sendQueue.queue.size();
-            LOG.info("\033[1;32m{} start writing {} to {}\033[0m", tag, size, sendQueue.dataPath.toString());
             long begin = System.currentTimeMillis();
             sendQueue.queue.stream().forEach(m -> {
                 try {
@@ -385,13 +361,15 @@ public class SimConn {
                     System.exit(1);
                 }
             });
+            outConn.flush();
+            outConn.close();
             // Write meta
             FileWriter metaWriter = new FileWriter(sendQueue.metaPath.toFile());
             metaWriter.write(String.format("%d\n%d\n", startMsgCount, msgCount));
             startMsgCount = msgCount;
             metaWriter.close();
 
-            LOG.info("\033[1;32m{} done writing {}, takes {}\033[0m", tag, size, (System.currentTimeMillis()-begin)/1000);
+            LOG.info("\033[1;32mThread {} done writing {}, takes {} ms, path={}\033[0m", tag, size, (System.currentTimeMillis()-begin), sendQueue.dataPath);
         }
 
         @Override
@@ -405,9 +383,9 @@ public class SimConn {
                         // This guarantees that if RUNNING, this thread can notify the master
                         // thread about the timeslot timeout if the master thread doesn't
                         // receive anything since timeslot timeout.
-                        if (System.currentTimeMillis() - fileBeginTs > interval) {
-                            put(new SimConnMessage(System.currentTimeMillis(), SimConnMessage.TIMEOUT_TYPE));
-                            fileBeginTs += interval;
+                        if (System.currentTimeMillis() - fileBeginTs > intervalMilli) {
+                            put(new SimConnMessage(System.nanoTime(), SimConnMessage.TIMEOUT_TYPE));
+                            fileBeginTs += intervalMilli;
                         }
                     }
                     if (sendQueue != null) {
@@ -446,7 +424,6 @@ public class SimConn {
                     System.exit(-1);
                 }
             }
-            outConn.flush();
         }
     }
     // End of AsyncFileWriter
