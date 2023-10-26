@@ -42,6 +42,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.net.ssl.SSLSocket;
+
 import org.apache.jute.BinaryInputArchive;
 import org.apache.jute.BinaryOutputArchive;
 import org.apache.jute.InputArchive;
@@ -503,6 +504,7 @@ public class Learner {
         if (simConn.enabled()) {
             simConn.request(new SimConn.RecordSimConnMessage(self.getCurrentVote().getId(), true, qp));
         }
+        qp = new QuorumPacket();
         readPacket(qp);
         // sending() learner recv LEADERINFO (reply later)
         if (simConn.enabled()) {
@@ -638,6 +640,7 @@ public class Learner {
             // we are now going to start getting transactions to apply followed by an UPTODATE
             outerLoop:
             while (self.isRunning()) {
+                qp = new QuorumPacket();
                 readPacket(qp);
                 switch (qp.getType()) {
                 case Leader.PROPOSAL:

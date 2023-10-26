@@ -175,7 +175,6 @@ public class SimConn {
         }
 
         public void serialize(OutputArchive a_, String tag) throws java.io.IOException {
-            LOG.info("BytesSimConnMessage bytes({}): {}", bytes.length, bytes);
             a_.startRecord(this,tag);
             a_.writeLong(timestamp, "");
             a_.writeBool(isSend, "");
