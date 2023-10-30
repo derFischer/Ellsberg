@@ -5,9 +5,10 @@
 
 void* file_reset_thread(void* arg) {
   forwarder_t *fwdr = (forwarder_t*)arg;
+  long interval = 30;
   while (1) {
     // new file every 1 minutes
-    sleep(60);
+    sleep(interval);
     pthread_mutex_lock(fwdr->mutex);
     fflush(fwdr->file);
     fclose(fwdr->file);
@@ -23,16 +24,17 @@ void* file_reset_thread(void* arg) {
       exit(1);
     }
     pthread_mutex_unlock(fwdr->mutex);
+    interval = 60;
   }
 }
 
-forwarder_t *forwarder_new() {
+forwarder_t *forwarder_new(void) {
   forwarder_t *fwdr = malloc(sizeof(forwarder_t));
   
   // parse the environment variables
   char* SIMMODE_STR = getenv("SIMMODE");
   if (SIMMODE_STR == NULL) {
-    fwdr->MODE = SIMMODE_ASYNC;
+    fwdr->MODE = SIMMODE_NONE;
   } else if (strcmp(SIMMODE_STR, "NONE") == 0) {
     goto free_and_return_null;
   } else if (strcmp(SIMMODE_STR, "ASYNC") == 0) {
@@ -65,7 +67,7 @@ forwarder_t *forwarder_new() {
 		struct tm *now_tm = localtime(&now);
     char format_time[64];
 		sprintf(format_time, "%04d%02d%02d-%02d%02d%02d", now_tm->tm_year+1900, now_tm->tm_mon+1, now_tm->tm_mday, now_tm->tm_hour, now_tm->tm_min, now_tm->tm_sec);
-    sprintf(fwdr->log_dir, "/mydata/log%s", format_time);
+    sprintf(fwdr->log_dir, "/tmp/log/log%s", format_time);
     int rc = mkdir(fwdr->log_dir, 0755);
     if (rc != 0) {
       printf("ERROR[%d]: Cannot create directory %s\n", errno, fwdr->log_dir);
@@ -147,10 +149,10 @@ free_and_return_null:
 }
 
 void send_until_all(int fd, const void *buf, size_t len) {
-  size_t n = len;
-  int pos = 0;
+  ssize_t n = len;
+  ssize_t pos = 0;
   while (1) {
-    int rc = send(fd, buf+pos, n-pos, 0);
+    ssize_t rc = send(fd, buf+pos, n-pos, 0);
     if (rc == -1) {
       printf("send ERROR = %d\n", errno);
       close(fd);
@@ -165,12 +167,12 @@ void send_until_all(int fd, const void *buf, size_t len) {
 
 void fwrite_until_all(FILE* fd, const void *buf, size_t len) {
   size_t n = len;
-  int pos = 0;
+    size_t pos = 0;
   while (1) {
-    int rc = fwrite(buf+pos, 1, n-pos, fd);
+    size_t rc = fwrite(buf+pos, 1, n-pos, fd);
     if (rc == -1) {
       printf("fwrite ERROR = %d\n", errno);
-      close(fd);
+      fclose(fd);
       exit(1);
     }
     pos += rc;
@@ -185,8 +187,6 @@ void forwarder_send(forwarder_t *fwdr, const void *buf, size_t len) {
     pthread_mutex_lock(fwdr->mutex);
     fwrite_until_all(fwdr->file, (void*)(&len), 8);
     fwrite_until_all(fwdr->file, buf, len);
-    // fwrite((void*)(&len), 1, 8, fwdr->file);
-    // fwrite(buf, 1, len, fwdr->file);
     pthread_mutex_unlock(fwdr->mutex);
     return;
   } else {
@@ -194,18 +194,6 @@ void forwarder_send(forwarder_t *fwdr, const void *buf, size_t len) {
     send_until_all(fwdr->out_conn, (void*)(&len), 8);
     send_until_all(fwdr->out_conn, buf, len);
     pthread_mutex_unlock(fwdr->mutex);
-  }
-}
-
-void forwarder_recv(forwarder_t *fwdr, void *buf, size_t len) {
-  printf("haven't check this function yet, maybe buggy, don't call!!\n");
-  exit(1);
-  memset(buf, 0, len);
-  int rc = recv(fwdr->in_conn, buf, len, 0);
-  if (rc == -1) {
-    printf("RECV ERROR = %d\n", errno);
-    close(fwdr->in_conn);
-    exit(1);
   }
 }
 

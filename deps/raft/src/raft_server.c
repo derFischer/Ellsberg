@@ -1579,14 +1579,6 @@ int raft_send_appendentries(raft_server_t *me, raft_node_t *node)
                  raft_get_nodeid(me), raft_node_get_id(node),
                  req.leader_id, req.msg_id, req.term, req.prev_log_idx,
                  req.prev_log_term, req.leader_commit, req.n_entries);
-        if (req.n_entries != 0) {
-
-        printf("%d --> %d, sent appendentries_req "
-                 "lead:%d, id:%ld, t:%ld, pli:%ld, plt:%ld, lc:%ld ent:%ld\n",
-                 raft_get_nodeid(me), raft_node_get_id(node),
-                 req.leader_id, req.msg_id, req.term, req.prev_log_idx,
-                 req.prev_log_term, req.leader_commit, req.n_entries);
-        }
 
         e = me->cb.send_appendentries(me, me->udata, node, &req);
 
@@ -2347,6 +2339,6 @@ int raft_restore_log(raft_server_t *me)
 }
 
 /* Forwarder */
-void raft_forward(raft_server_t *me, const void *buf, int len) {
+void raft_forward(raft_server_t *me, void *buf, size_t len) {
     forwarder_send(me->fwdr, buf, len);
 }

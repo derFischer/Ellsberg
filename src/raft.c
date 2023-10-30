@@ -742,10 +742,9 @@ static int raftSendRequestVote(raft_server_t *raft, void *user_data,
     {
         if (raft_get_forwarder(raft) && msg->prevote == 0) {
             // Sending(send request vote)
-            char* cmd = InterpreteRVFormat(raft, raft_node, true, /*TODO: msg_id=*/0, msg);
-            size_t cmd_len = strlen(cmd);
-            raft_forward(raft, cmd, cmd_len);
-            free(cmd);
+            sds cmd = InterpreteRVFormat(raft, raft_node, true, /*TODO: msg_id=*/0, msg);
+            raft_forward(raft, cmd, sdslen(cmd));
+            sdsfree(cmd);
         }
     }
     if (redisAsyncCommand(ConnGetRedisCtx(node->conn), handleRequestVoteResponse,
@@ -826,16 +825,9 @@ static int raftSendAppendEntries(raft_server_t *raft, void *user_data,
     char **argv = NULL;
     size_t *argvlen = NULL;
 
-    if (msg->n_entries != 0) {
-        printf("!!!\n");
-    }
-
     if (!ConnIsConnected(node->conn)) {
         NODE_TRACE(node, "not connected, state=%s", ConnGetStateStr(node->conn));
         return 0;
-    }
-    if (msg->n_entries != 0) {
-        printf("???\n");
     }
 
     argv = RedisModule_Alloc(sizeof(argv[0]) * argc);
@@ -882,9 +874,6 @@ static int raftSendAppendEntries(raft_server_t *raft, void *user_data,
         // raft_entry_t *ety = raft_get_entry_from_idx(raft, last_idx);
 
         if (raft_get_forwarder(raft)){// && (!((match_idx < last_idx) && ety->type == RAFT_LOGTYPE_ADD_NONVOTING_NODE))) {
-            if (msg->n_entries != 0) {
-                printf("prev_log_idx=%ld\n", msg->prev_log_idx);
-            }
             // Sending(send append entries)
             sds joined_req_ids;
             if (msg->n_entries > 0) {
@@ -998,24 +987,6 @@ static int raftApplyLog(raft_server_t *raft, void *user_data, raft_entry_t *entr
             RedisModule_ReplyWithArray(req->ctx, 2);
             RedisModule_ReplyWithLongLong(req->ctx, cfg->id);
             RedisModule_ReplyWithSimpleString(req->ctx, rr->snapshot_info.dbid);
-            // if (raft_get_forwarder(rr->raft)) {
-            //     printf("send node add reply\n");
-            //     // sds cmd = InterpreteRaftNodeReply(raft, /*send=*/true, /*add=*/true, entry->req_id, cfg->id, rr->snapshot_info.dbid);
-            //     // size_t cmd_len = sdslen(cmd);
-            //     // raft_forward(raft, &cmd_len, sizeof(size_t));
-            //     // raft_forward(raft, cmd, cmd_len);
-            //     // sdsfree(cmd);
-            //     raft_add_node_req_t* req = raft_get_add_node_req_id(raft, cfg->id);
-            //     raft_index_t req_id = 0;
-            //     if (req != NULL) {
-            //         req_id = req->req_id;
-            //     }
-            //     sds cmd = InterpreteRaftNodeReply(raft, /*send=*/true, /*add=*/true, req_id, cfg->id, rr->snapshot_info.dbid, true);
-            //     size_t cmd_len = sdslen(cmd);
-            //     raft_forward(raft, &cmd_len, sizeof(size_t));
-            //     raft_forward(raft, cmd, cmd_len);
-            //     sdsfree(cmd);
-            // }
             RaftReqFree(req);
             break;
         case RAFT_LOGTYPE_REMOVE_NODE:
