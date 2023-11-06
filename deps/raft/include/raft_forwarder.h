@@ -53,7 +53,9 @@ struct forwarder {
 
     // For FILE mode
     FILE* file;
+    FILE* meta_file;
     char log_dir[64];
+    long num_messages;
 };
 
 

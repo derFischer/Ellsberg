@@ -6,12 +6,17 @@
 void* file_reset_thread(void* arg) {
   forwarder_t *fwdr = (forwarder_t*)arg;
   long interval = 30;
+  long prev_num_messages = 0;
   while (1) {
     // new file every 1 minutes
     sleep(interval);
     pthread_mutex_lock(fwdr->mutex);
     fflush(fwdr->file);
     fclose(fwdr->file);
+    fprintf(fwdr->meta_file, "%ld\n%ld\n", prev_num_messages, fwdr->num_messages);
+    fclose(fwdr->meta_file);
+    prev_num_messages = fwdr->num_messages;
+
     time_t now = time(NULL);
     struct tm *now_tm = localtime(&now);
     char format_time[64];
@@ -23,6 +28,13 @@ void* file_reset_thread(void* arg) {
       printf("ERROR: Cannot open file %s for writing\n", log_path);
       exit(1);
     }
+    char meta_path[256];
+    sprintf(meta_path, "%s/messages.%s.%s.meta", fwdr->log_dir, getenv("IID"), format_time);
+    fwdr->meta_file = fopen(meta_path, "w");
+    if (fwdr->file == NULL) {
+        printf("ERROR: Cannot open file %s for writing\n", log_path);
+        exit(1);
+    }
     pthread_mutex_unlock(fwdr->mutex);
     interval = 60;
   }
@@ -30,6 +42,7 @@ void* file_reset_thread(void* arg) {
 
 forwarder_t *forwarder_new(void) {
   forwarder_t *fwdr = malloc(sizeof(forwarder_t));
+  fwdr->num_messages = 0;
   
   // parse the environment variables
   char* SIMMODE_STR = getenv("SIMMODE");
@@ -74,12 +87,19 @@ forwarder_t *forwarder_new(void) {
       exit(1);
     }
 
-	  char log_path[256];
+    char log_path[256];
     sprintf(log_path, "%s/messages.%s.%s.data", fwdr->log_dir, iid, format_time);
     fwdr->file = fopen(log_path, "w");
     if (fwdr->file == NULL) {
       printf("ERROR: Cannot open file %s\n", log_path);
       exit(1);
+    }
+    char meta_path[256];
+    sprintf(meta_path, "%s/messages.%s.%s.meta", fwdr->log_dir, getenv("IID"), format_time);
+    fwdr->meta_file = fopen(meta_path, "w");
+    if (fwdr->file == NULL) {
+        printf("ERROR: Cannot open file %s for writing\n", log_path);
+        exit(1);
     }
     
     // create a thread to reset the file every interval
@@ -182,11 +202,12 @@ void fwrite_until_all(FILE* fd, const void *buf, size_t len) {
   }
 }
 
-void forwarder_send(forwarder_t *fwdr, const void *buf, size_t len) { 
+void forwarder_send(forwarder_t *fwdr, const void *buf, size_t len) {
   if (fwdr->MODE == SIMMODE_FILE) {
     pthread_mutex_lock(fwdr->mutex);
     fwrite_until_all(fwdr->file, (void*)(&len), 8);
     fwrite_until_all(fwdr->file, buf, len);
+    fwdr->num_messages++;
     pthread_mutex_unlock(fwdr->mutex);
     return;
   } else {
