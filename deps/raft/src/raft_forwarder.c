@@ -5,7 +5,7 @@
 
 void* file_reset_thread(void* arg) {
   forwarder_t *fwdr = (forwarder_t*)arg;
-  long interval = 30;
+  long interval = 20;
   long prev_num_messages = 0;
   while (1) {
     // new file every 1 minutes
@@ -36,7 +36,7 @@ void* file_reset_thread(void* arg) {
         exit(1);
     }
     pthread_mutex_unlock(fwdr->mutex);
-    interval = 60;
+    interval = 20;
   }
 }
 
