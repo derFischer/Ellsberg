@@ -25,12 +25,7 @@ import java.io.DataInputStream;
 import java.io.IOException;
 import java.net.Socket;
 import java.nio.ByteBuffer;
-import java.util.Date;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Queue;
+import java.util.*;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -117,6 +112,7 @@ public class LearnerHandler extends ZooKeeperThread {
     protected final AtomicLong requestsReceived = new AtomicLong();
 
     protected volatile long lastZxid = -1;
+    private ArrayList<QuorumPacket> syncArrayList = null;
 
     public synchronized long getLastZxid() {
         return lastZxid;
@@ -498,6 +494,10 @@ public class LearnerHandler extends ZooKeeperThread {
             }
 
             this.simConn.init(simConn.myid, String.format("handler.%d", getSid()));
+            // sending() leader confirmed tcp connection
+            if (simConn.enabled()) {
+                simConn.request(SimConn.BytesSimConnMessage.createForTCP(getSid()));
+            }
             // sending() leader recv FOLLOWERINFO (CEPOCH)
             if (simConn.enabled()) {
                 simConn.request(new SimConn.RecordSimConnMessage(getSid(), false, qp));
@@ -563,6 +563,7 @@ public class LearnerHandler extends ZooKeeperThread {
 
             // Take any necessary action if we need to send TRUNC or DIFF
             // startForwarding() will be called in all cases
+            syncArrayList = new ArrayList<>(2);
             boolean needSnap = syncFollower(peerLastZxid, learnerMaster);
 
             // syncs between followers and the leader are exempt from throttling because it
@@ -612,9 +613,11 @@ public class LearnerHandler extends ZooKeeperThread {
                 oa.writeRecord(newLeaderQP, "packet");
             } else {
                 QuorumPacket newLeaderQP = new QuorumPacket(Leader.NEWLEADER, newLeaderZxid, learnerMaster.getQuorumVerifierBytes(), null);
-                // sending() leader send NEWLEADER
+                // sending() leader send NEWLEADER (All sync stage qps are sent together with newleader here)
                 if (simConn.enabled()) {
-                    simConn.request(new SimConn.RecordSimConnMessage(getSid(), true, newLeaderQP));
+                    // simConn.request(new SimConn.RecordSimConnMessage(getSid(), true, newLeaderQP));
+                    syncArrayList.add(newLeaderQP);
+                    simConn.request(new SimConn.RecordArraySimConnMessage(getSid(), true, syncArrayList));
                 }
                 queuedPackets.add(newLeaderQP);
             }
@@ -1063,7 +1066,8 @@ public class LearnerHandler extends ZooKeeperThread {
             queuePacket(propose.packet);
             // sending() leader send proposal (SYNC stage)
             if (simConn.enabled()) {
-                simConn.request(new SimConn.RecordSimConnMessage(getSid(), true, propose.packet));
+                // simConn.request(new SimConn.RecordSimConnMessage(getSid(), true, propose.packet));
+                syncArrayList.add(propose.packet);
             }
             queueOpPacket(Leader.COMMIT, packetZxid);
             queuedZxid = packetZxid;
@@ -1137,7 +1141,8 @@ public class LearnerHandler extends ZooKeeperThread {
         queuePacket(packet);
         // sending() leader send DIFF/TRUNC/SNAP/COMMIT (SYNC stage)
         if (simConn.enabled()) {
-            simConn.request(new SimConn.RecordSimConnMessage(getSid(), true, packet));
+            // simConn.request(new SimConn.RecordSimConnMessage(getSid(), true, packet));
+            syncArrayList.add(packet);
         }
     }
 

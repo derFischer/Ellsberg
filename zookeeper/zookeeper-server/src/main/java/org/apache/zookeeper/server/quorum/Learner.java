@@ -29,11 +29,8 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
-import java.util.ArrayDeque;
-import java.util.Deque;
-import java.util.Map;
+import java.util.*;
 import java.util.Map.Entry;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -490,6 +487,11 @@ public class Learner {
         qp.setType(pktType);
         qp.setZxid(ZxidUtils.makeZxid(self.getAcceptedEpoch(), 0));
 
+        // sending() learner confirmed tcp connection
+        if (simConn.enabled()) {
+            simConn.request(SimConn.BytesSimConnMessage.createForTCP(self.getCurrentVote().getId()));
+        }
+
         /*
          * Add sid to payload
          */
@@ -762,6 +764,7 @@ public class Learner {
                     break outerLoop;
                 case Leader.NEWLEADER: // Getting NEWLEADER here instead of in discovery
                     // sending() learner recv LEADERINFO (will reply later)
+                    // (all received for sync will be forwarded here)
                     if (simConn.enabled()) {
                         simConn.request(new SimConn.RecordSimConnMessage(self.getLeaderId(), false, qp));
                     }

@@ -2,9 +2,6 @@ package org.apache.zookeeper.server;
 
 import org.apache.jute.*;
 import org.apache.jute.Record;
-import org.apache.zookeeper.proto.ReplyHeader;
-import org.apache.zookeeper.proto.RequestHeader;
-import org.apache.zookeeper.server.quorum.Leader;
 import org.apache.zookeeper.server.quorum.QuorumPacket;
 import org.apache.zookeeper.txn.TxnHeader;
 import org.slf4j.Logger;
@@ -15,14 +12,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.ZoneId;
-import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 
 public class SimConn {
     public static boolean enabled = false;
@@ -35,6 +27,7 @@ public class SimConn {
         final public static int BYTES_TYPE = 1;
         final public static int QP_TYPE = 2;
         final public static int HDR_TYPE = 3;
+        final public static int QP_ARRAY_TYPE = 4;
         int simConnMessageType;
         long timestamp;
 
@@ -56,11 +49,13 @@ public class SimConn {
         public void deserialize(InputArchive archive, String tag) throws IOException {}
     }
 
-    public static final int NOT = 0x10000000;
-    public static final int CLIENTREQ = 0x10000001;
-    public static final int CLIENTRESP = 0x10000002;
-    public static final int CLIENTRO = 0x10000003;
-    public static final int CLIENTRORESP = 0x10000004;
+    public static final int NOT = 0x1000_0000;
+    public static final int CLIENTREQ = 0x1000_0001;
+    public static final int CLIENTRESP = 0x1000_0002;
+    public static final int CLIENTRO = 0x1000_0003;
+    public static final int CLIENTRORESP = 0x1000_0004;
+    public static final int BIGSYNC = 0x1000_0005;
+    public static final int TCP = 0x1000_0006;
 
     public static class RecordSimConnMessage extends SimConnMessage {
         protected static final Logger LOG = LoggerFactory.getLogger(SimConnMessage.class);
@@ -149,6 +144,51 @@ public class SimConn {
     }
     // End of RecordSimConnMessage
 
+    public static class RecordArraySimConnMessage extends RecordSimConnMessage {
+        // This is only for the sync
+        public ArrayList<QuorumPacket> qps;
+        public RecordArraySimConnMessage(long peerId, boolean isSend, ArrayList<QuorumPacket> qps) {
+            super(QP_TYPE);
+            if (!enabled) return;
+            assert (qps != null);
+            timestamp = System.nanoTime();
+            this.isSend = isSend;
+            this.peerId = peerId;
+            this.type = BIGSYNC;
+            this.qps = qps;
+        }
+
+        public void serialize(OutputArchive a_, String tag) throws java.io.IOException {
+            a_.startRecord(this,tag);
+            a_.writeLong(timestamp, "");
+            a_.writeBool(isSend, "");
+            a_.writeLong(peerId, "");
+            a_.writeInt(type, "");
+            a_.writeInt(this.qps.size(), "");
+            for (QuorumPacket qp : this.qps) {
+                a_.writeRecord(qp, "");
+            }
+            a_.endRecord(this, tag);
+        }
+
+        public void deserialize(InputArchive a_, String tag) throws java.io.IOException {
+            a_.startRecord(tag);
+            timestamp = a_.readLong("");
+            isSend = a_.readBool("");
+            peerId = a_.readLong("");
+            type = a_.readInt("");
+            int size = a_.readInt("");
+            qps = new ArrayList<>(size);
+            for (int i = 0; i < size; i++) {
+                QuorumPacket qp = new QuorumPacket();
+                a_.readRecord(qp, "");
+                qps.add(qp);
+            }
+            a_.endRecord(tag);
+        }
+    }
+    // End of RecordArraySimConnMessage
+
     public static class BytesSimConnMessage extends SimConnMessage {
         protected static final Logger LOG = LoggerFactory.getLogger(SimConnMessage.class);
         long timestamp;
@@ -162,6 +202,15 @@ public class SimConn {
             super(BYTES_TYPE);
             if (!enabled) return;
             timestamp = System.nanoTime();
+        }
+
+        public static BytesSimConnMessage createForTCP(long peerId) {
+            BytesSimConnMessage m = new BytesSimConnMessage();
+            m.isSend = false;
+            m.peerId = peerId;
+            m.type = TCP;
+            m.bytes = new byte[0];
+            return m;
         }
 
         public BytesSimConnMessage(boolean isSend, long peerId, int type, byte[] bytes) {
