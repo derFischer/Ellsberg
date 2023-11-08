@@ -104,7 +104,7 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 		c.bufferedData = make([][]byte, 0)
 		now := time.Now()
 		formatTime := fmt.Sprintf("%04d%02d%02d-%02d%02d%02d", now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second())
-		c.logDir = "/mydata/log" + formatTime
+		c.logDir = "/tmp/log/log" + formatTime
 		err = os.MkdirAll(c.logDir, 0755)
 		if err != nil {
 			panic(fmt.Sprintf("Cannot create log directory: %v", err))
@@ -209,8 +209,8 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 				}
 			}
 
-			timeAfter := time.After(30 * time.Second)
-			period := 120
+			timeAfter := time.After(20 * time.Second)
+			period := 20
 			warmupDone := false
 			for !warmupDone {
 				select {
