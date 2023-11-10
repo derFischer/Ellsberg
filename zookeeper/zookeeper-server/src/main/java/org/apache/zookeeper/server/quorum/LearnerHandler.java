@@ -1238,6 +1238,7 @@ public class LearnerHandler extends ZooKeeperThread {
 
     public SimConn simConn;
     public void setSimConn(SimConn simConn) {
-        this.simConn = new SimConn(); // Will init in `run()` after knowing follower id.
+        this.simConn = simConn.mode != SimConn.MODE.FILE ? simConn : new SimConn();
+        // Will init in `run()` after knowing follower id.
     }
 }

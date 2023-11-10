@@ -1344,8 +1344,12 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
         Follower f = new Follower(this, new FollowerZooKeeperServer(logFactory, this, this.zkDb));
         f.setSimConn(simConn);
         f.zk.simConn = simConn;
-        f.zk.simConnAck = new SimConn();
-        f.zk.simConnAck.init(simConn.myid, "ack");
+        if (simConn.mode == SimConn.MODE.FILE) {
+            f.zk.simConnAck = new SimConn();
+            f.zk.simConnAck.init(simConn.myid, "ack");
+        } else {
+            f.zk.simConnAck = simConn;
+        }
         return f;
     }
 
@@ -1353,10 +1357,15 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
         Leader l = new Leader(this, new LeaderZooKeeperServer(logFactory, this, this.zkDb));
         l.setSimConn(simConn);
         l.zk.simConn = simConn;
-        l.zk.simConnSendResp = new SimConn();
-        l.zk.simConnRecvReq = new SimConn();
-        l.zk.simConnRecvReq.init(simConn.myid, "recvreq");
-        l.zk.simConnSendResp.init(simConn.myid, "sendresp");
+        if (simConn.mode == SimConn.MODE.FILE) {
+            l.zk.simConnSendResp = new SimConn();
+            l.zk.simConnRecvReq = new SimConn();
+            l.zk.simConnRecvReq.init(simConn.myid, "recvreq");
+            l.zk.simConnSendResp.init(simConn.myid, "sendresp");
+        } else {
+            l.zk.simConnSendResp = simConn;
+            l.zk.simConnRecvReq = simConn;
+        }
         return l;
     }
 
@@ -1364,9 +1373,15 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
         Observer o = new Observer(this, new ObserverZooKeeperServer(logFactory, this, this.zkDb));
         o.setSimConn(simConn);
         o.zk.simConn = simConn;
-        o.zk.simConnSendResp = simConnSendResp;
-        o.zk.simConnRecvReq = simConnRecvReq;
-        o.zk.simConnAck = simConnAck;
+        if (simConn.mode == SimConn.MODE.FILE) {
+            o.zk.simConnSendResp = new SimConn();
+            o.zk.simConnRecvReq = new SimConn();
+            o.zk.simConnRecvReq.init(simConn.myid, "recvreq");
+            o.zk.simConnSendResp.init(simConn.myid, "sendresp");
+        } else {
+            o.zk.simConnSendResp = simConn;
+            o.zk.simConnRecvReq = simConn;
+        }
         return o;
     }
 

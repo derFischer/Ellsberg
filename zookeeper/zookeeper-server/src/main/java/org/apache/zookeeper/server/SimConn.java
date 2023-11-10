@@ -248,14 +248,14 @@ public class SimConn {
 
     protected static final Logger LOG = LoggerFactory.getLogger(SimConn.class);
 
-    private enum MODE {
+    public enum MODE {
         NONE,
         ASYNC,
         SYNC,
         FILE
     }
 
-    private enum CONNTYPE {
+    public enum CONNTYPE {
         TCP,
         UNIX,
         PIPE
@@ -292,14 +292,21 @@ public class SimConn {
 
         public void run() {
             state = RUNNING;
+            ByteArrayOutputStream tmpOutputStream = new ByteArrayOutputStream(2048);
             while (true) {
                 try {
                     SimConnMessage m = sendQueue.take();
+                    tmpOutputStream.reset();
+                    DataOutputStream tmpDos = new DataOutputStream(tmpOutputStream);
+                    OutputArchive tmpOutArchive = BinaryOutputArchive.getArchive(tmpDos);
+                    m.serialize(tmpOutArchive, "");
+                    long length = 4 + tmpDos.size();
+                    outArchive.writeLong(length, "length");
                     outArchive.writeInt(m.simConnMessageType, "");
                     m.serialize(outArchive, "packet");
                 } catch (java.io.IOException | InterruptedException e) {
                     state = SHUTDOWN;
-                    LOG.info(e.toString());
+                    LOG.error(e.toString());
                     System.exit(1);
                 }
             }
@@ -476,8 +483,8 @@ public class SimConn {
     }
     // End of AsyncFileWriter
 
-    MODE mode;
-    CONNTYPE conntype;
+    public MODE mode;
+    public CONNTYPE conntype;
 
     // Just in case we may need it.
     private long iid;
