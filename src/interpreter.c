@@ -155,12 +155,10 @@ InterpreteRaftNode(raft_server_t *raft, bool send, bool add, size_t req_id, Redi
     argv_tosend[0] = send ? "1" : "0";
     // msg_type: Client Request
     argv_tosend[1] = "1";
-    // TODO: msg_id
     sds req_id_sds = sdsfromlonglong(req_id);
     argv_tosend[2] = req_id_sds;
     // others
     TranslateRMArgvOrUseCArgv(rmargv, cargv, argc, argv_tosend, more_argc);
-
     redisFormatSdsCommandArgv(&cmd, argc_tosend, argv_tosend, NULL);
 
     // sds replaced = DupAndReplaceSplitter(cmd, 0);

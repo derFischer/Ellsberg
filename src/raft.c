@@ -988,20 +988,16 @@ static int raftApplyLog(raft_server_t *raft, void *user_data, raft_entry_t *entr
             RedisModule_ReplyWithLongLong(req->ctx, cfg->id);
             RedisModule_ReplyWithSimpleString(req->ctx, rr->snapshot_info.dbid);
              if (raft_get_forwarder(rr->raft)) {
-                 printf("send node add reply\n");
-                 // sds cmd = InterpreteRaftNodeReply(raft, /*send=*/true, /*add=*/true, entry->req_id, cfg->id, rr->snapshot_info.dbid);
-                 // size_t cmd_len = sdslen(cmd);
-                 // raft_forward(raft, cmd, cmd_len);
-                 // sdsfree(cmd);
-                 raft_add_node_req_t* req = raft_get_add_node_req_id(raft, cfg->id);
-                 raft_index_t req_id = 0;
-                 if (req != NULL) {
-                     req_id = req->req_id;
-                 }
-                 sds cmd = InterpreteRaftNodeReply(raft, /*send=*/true, /*add=*/true, req_id, cfg->id, rr->snapshot_info.dbid, true);
-                 size_t cmd_len = sdslen(cmd);
-                 raft_forward(raft, cmd, cmd_len);
-                 sdsfree(cmd);
+//                 printf("send node add reply\n");
+//                 raft_add_node_req_t* req = raft_get_add_node_req_id(raft, cfg->id);
+//                 raft_index_t req_id = 0;
+//                 if (req != NULL) {
+//                     req_id = req->req_id;
+//                 }
+//                 sds cmd = InterpreteRaftNodeReply(raft, /*send=*/true, /*add=*/true, req_id, cfg->id, rr->snapshot_info.dbid, true);
+//                 size_t cmd_len = sdslen(cmd);
+//                 raft_forward(raft, cmd, cmd_len);
+//                 sdsfree(cmd);
              }
             RaftReqFree(req);
             break;
@@ -1012,9 +1008,9 @@ static int raftApplyLog(raft_server_t *raft, void *user_data, raft_entry_t *entr
             if (req) {
                 if (raft_get_forwarder(rr->raft)) {
                     // Sending(send node remove reply)
-                    sds cmd = InterpreteRaftNodeReply(raft, /*send=*/true, /*add=*/true, entry->req_id, cfg->id, NULL, true);
-                    // size_t cmd_len = sdslen(cmd);
-                    // raft_forward(raft, cmd, cmd_len);
+                    sds cmd = InterpreteRaftNodeReply(raft, /*send=*/true, /*add=*/false, entry->req_id, cfg->id, NULL, true);
+                    size_t cmd_len = sdslen(cmd);
+                    raft_forward(raft, cmd, cmd_len);
                     sdsfree(cmd);
                 }
                 RedisModule_ReplyWithSimpleString(req->ctx, "OK");

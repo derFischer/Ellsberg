@@ -206,8 +206,8 @@ static int cmdRaftNode(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
         if (raft_get_forwarder(rr->raft)) {
             // Sending(recv node remove)
             sds cmd = InterpreteRaftNode(rr->raft, false, /*add=*/false, /*req_id=*/entry->req_id, argv, NULL, argc);
-            // size_t cmd_len = sdslen(cmd);
-            // raft_forward(rr->raft, cmd, cmd_len);
+             size_t cmd_len = sdslen(cmd);
+             raft_forward(rr->raft, cmd, cmd_len);
             sdsfree(cmd);
         }
         int e = raft_recv_entry(rr->raft, entry, NULL);
