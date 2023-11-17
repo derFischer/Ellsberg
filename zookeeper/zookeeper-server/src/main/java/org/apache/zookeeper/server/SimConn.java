@@ -341,13 +341,19 @@ public class SimConn {
 
         public static class SendQueue {
             public ArrayList<SimConnMessage> queue;
-            final public long beginTs;
-            final public Path dataPath;
-            final public Path metaPath;
+            public long beginTs;
+            public Path dataPath;
+            public Path metaPath;
+            final public AsyncFileWriter afw;
             public SendQueue(long beginTs, int size, AsyncFileWriter afw) {
                 this.beginTs = beginTs;
+                this.afw = afw;
                 queue = new ArrayList<>(size);
-                final String formatTime = dateFormatter.format(java.time.Instant.ofEpochMilli(beginTs));
+                ResetLogPath(beginTs);
+            }
+
+            public void ResetLogPath(long tsMilli) {
+                final String formatTime = dateFormatter.format(java.time.Instant.ofEpochMilli(tsMilli));
                 Path timeSlotDir = Paths.get(afw.logDir, formatTime);
                 timeSlotDir.toFile().mkdirs();
                 dataPath = Paths.get(timeSlotDir.toString(), String.format("messages.%s.%s.data", afw.iid, afw.tag));
@@ -369,7 +375,7 @@ public class SimConn {
             // Every put message will have timestamp larger than current,
             // and so larger than fileBeginTs
             queueBeginTs = fileBeginTs = getCurrentBeginTs();
-            sendQueue = new SendQueue(fileBeginTs, queueSize, this);
+            sendQueue = new SendQueue(0, queueSize, this);
             immutableSendQueues = new ArrayBlockingQueue<>(4);
             state = NOT_READY;
         }
@@ -379,11 +385,22 @@ public class SimConn {
             return intervalMilli * ((current - initTimeMilli) / intervalMilli) + initTimeMilli;
         }
 
+        public long getPeriodTs(long tsMilli) {
+            return intervalMilli * (tsMilli / intervalMilli);
+            // return intervalMilli * ((tsMilli - initTimeMilli) / intervalMilli) + initTimeMilli;
+        }
+
         @Override
         public synchronized void put(SimConnMessage m) {
-            if (queueBeginTs + intervalMilli - initTimeMilli < (m.timestamp - initTimeNano)/1_000_000L
+            long mTsMilli = m.timestamp/1_000_000L;
+            if (sendQueue.beginTs == 0) {
+                sendQueue.beginTs = getPeriodTs(mTsMilli);
+                sendQueue.ResetLogPath(sendQueue.beginTs);
+            }
+            // if ((queueBeginTs + intervalMilli - initTimeMilli)*1_000_000L < (m.timestamp - initTimeNano)
+            long mTimeslotBegin = getPeriodTs(mTsMilli);
+            if (mTimeslotBegin > sendQueue.beginTs
                     || m.simConnMessageType == SimConnMessage.TIMEOUT_TYPE) {
-                queueBeginTs = queueBeginTs + intervalMilli;
                 // Set the `prevSendQueue`
                 int lastSize = sendQueue.queue.size();
                 try {
@@ -392,7 +409,7 @@ public class SimConn {
                     LOG.error("Shouldn't be interrupted");
                     System.exit(-1);
                 }
-                sendQueue = new SendQueue(queueBeginTs, lastSize, this);
+                sendQueue = new SendQueue(mTimeslotBegin, lastSize, this);
             }
             if (m.simConnMessageType != SimConnMessage.TIMEOUT_TYPE) {
                 sendQueue.queue.add(m);
@@ -433,16 +450,17 @@ public class SimConn {
             try {
                 while (state == RUNNING) {
                     SendQueue sendQueue = null;
-                    while (sendQueue == null && state == RUNNING) {
-                        sendQueue = immutableSendQueues.poll(2, TimeUnit.SECONDS);
-                        // This guarantees that if RUNNING, this thread can notify the master
-                        // thread about the timeslot timeout if the master thread doesn't
-                        // receive anything since timeslot timeout.
-                        if (System.currentTimeMillis() - fileBeginTs > intervalMilli) {
-                            put(new SimConnMessage(System.nanoTime(), SimConnMessage.TIMEOUT_TYPE));
-                            fileBeginTs += intervalMilli;
-                        }
-                    }
+                    // while (sendQueue == null && state == RUNNING) {
+                    //     sendQueue = immutableSendQueues.poll(2, TimeUnit.SECONDS);
+                    //     // This guarantees that if RUNNING, this thread can notify the master
+                    //     // thread about the timeslot timeout if the master thread doesn't
+                    //     // receive anything since timeslot timeout.
+                    //     if (System.currentTimeMillis() - fileBeginTs > intervalMilli) {
+                    //         put(new SimConnMessage(System.nanoTime(), SimConnMessage.TIMEOUT_TYPE));
+                    //         fileBeginTs += intervalMilli;
+                    //     }
+                    // }
+                    sendQueue = immutableSendQueues.poll(2, TimeUnit.SECONDS);
                     if (sendQueue != null) {
                         writeSendQueue(sendQueue);
                     }
