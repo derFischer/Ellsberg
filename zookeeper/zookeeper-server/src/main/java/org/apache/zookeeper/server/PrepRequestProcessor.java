@@ -151,8 +151,8 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements Req
                             this.zks.simConnRecvReq.request(SimConn.RecordSimConnMessage.createForClientReq(request.sessionId, fakeHeader, false));
                             break;
                         case OpCode.getData:
-                            fakeHeader = new TxnHeader(request.sessionId, request.cxid, 0, 0, 0);
-                            this.zks.simConnRecvReq.request(SimConn.RecordSimConnMessage.createForClientReq(request.sessionId, fakeHeader, true));
+                            // fakeHeader = new TxnHeader(request.sessionId, request.cxid, 0, 0, 0);
+                            // this.zks.simConnRecvReq.request(SimConn.RecordSimConnMessage.createForClientReq(request.sessionId, fakeHeader, true));
                             break;
                         default:
                             LOG.info("\033[1;31m{}\033[0m", request.type);

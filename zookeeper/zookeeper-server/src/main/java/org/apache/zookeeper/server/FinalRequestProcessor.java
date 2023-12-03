@@ -613,8 +613,8 @@ public class FinalRequestProcessor implements RequestProcessor {
                         responseSize = cnxn.sendResponse(hdr, rsp, "response", path, stat, opCode);
                         // Get will get here
                         // sending() any reply to client (read)
-                        TxnHeader fakeHeader = new TxnHeader(request.sessionId, request.cxid, 0, 0, 0);
-                        this.zks.simConnSendResp.request(SimConn.RecordSimConnMessage.createForClientResp(request.sessionId, fakeHeader, true));
+                        // TxnHeader fakeHeader = new TxnHeader(request.sessionId, request.cxid, 0, 0, 0);
+                        // this.zks.simConnSendResp.request(SimConn.RecordSimConnMessage.createForClientResp(request.sessionId, fakeHeader, true));
                         break;
                     }
                     case OpCode.getChildren2 : {
