@@ -118,7 +118,7 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 		trace.LogIfLong(traceThreshold)
 	}(time.Now())
 
-	id := s.reqSLROIDGen.Next()
+	id := s.reqIDGen.Next()
 	//reply checker
 	// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.ClientRequest, Msg: messagepb.ClientReq{Req: r, ID: id}})
 
