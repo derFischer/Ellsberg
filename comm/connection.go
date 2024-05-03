@@ -196,7 +196,7 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 	}
 
 	if MODE == FILE || MODE == SYNCANDFILE {
-		c.reqBytesCh = make(chan []byte, 1024)
+		c.reqBytesCh = make(chan []byte, 2048)
 		go func() {
 			writeToFile := func(f *os.File, reqBytes []byte) {
 				c.msgCount++
@@ -209,8 +209,8 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 				}
 			}
 
-			timeAfter := time.After(20 * time.Second)
-			period := 20
+			timeAfter := time.After(1 * time.Second)
+			period := 1
 			warmupDone := false
 			for !warmupDone {
 				select {
