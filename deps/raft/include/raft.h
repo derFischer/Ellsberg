@@ -11,9 +11,6 @@
 #define RAFT_H_
 
 #include <stddef.h>
-#include <stdint.h>
-#include <pthread.h>
-#include <stdio.h>
 
 #include "raft_types.h"
 
@@ -1621,22 +1618,12 @@ int raft_pending_operations(raft_server_t *me);
  */
 int raft_restore_log(raft_server_t *me);
 
-
 #include "raft_forwarder.h"
-
-typedef struct raft_add_node_req {
-    raft_req_id_t req_id;
-    raft_node_id_t node_id;
-} raft_add_node_req_t;
 
 forwarder_t *raft_get_forwarder(raft_server_t *me);
 
 void raft_forward(raft_server_t *me, void *buf, size_t len);
 
 raft_req_id_t raft_node_next_reqid(raft_node_t *node);
-
-raft_add_node_req_t* raft_get_add_node_req_id (raft_server_t *me, raft_node_id_t id);
-
-void raft_add_node_req(raft_server_t *me, raft_node_id_t id, raft_req_id_t reqid);
 
 #endif /* RAFT_H_ */

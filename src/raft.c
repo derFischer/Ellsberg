@@ -8,7 +8,6 @@
 #include "log.h"
 #include "redisraft.h"
 #include "interpreter.h"
-#include "raft_private.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -413,6 +412,7 @@ void RaftExecuteCommandArray(RedisRaftCtx *rr,
         exitRedisModuleCall();
 
         rr->entered_eval = old_entered_eval;
+
         if (reply_ctx) {
             if (raft_get_forwarder(rr->raft)) {
                 // Sending(send client reply)
@@ -738,14 +738,11 @@ static int raftSendRequestVote(raft_server_t *raft, void *user_data,
     }
 
     /* RAFT.REQUESTVOTE <target_node_id> <src_node_id> <prevote>:<term>:<candidate_id>:<last_log_idx>:<last_log_term> */
-    LOG_NOTICE("RAFT.REQUESTVOTE");
-    {
-        if (raft_get_forwarder(raft) && msg->prevote == 0) {
-            // Sending(send request vote)
-            sds cmd = InterpreteRVFormat(raft, raft_node, true, /*TODO: msg_id=*/0, msg);
-            raft_forward(raft, cmd, sdslen(cmd));
-            sdsfree(cmd);
-        }
+    if (raft_get_forwarder(raft) && msg->prevote == 0) {
+        // Sending(send request vote)
+        sds cmd = InterpreteRVFormat(raft, raft_node, true, /*TODO: msg_id=*/0, msg);
+        raft_forward(raft, cmd, sdslen(cmd));
+        sdsfree(cmd);
     }
     if (redisAsyncCommand(ConnGetRedisCtx(node->conn), handleRequestVoteResponse,
                           node, "RAFT.REQUESTVOTE %d %d %d:%ld:%d:%ld:%ld",
@@ -867,30 +864,29 @@ static int raftSendAppendEntries(raft_server_t *raft, void *user_data,
         argvlen[6 + i * 2] = e->data_len;
         argv[6 + i * 2] = e->data;
     }
-    {
-        //if nonvoting, ignore the message
-        // raft_index_t match_idx = raft_node_get_match_idx(raft_node);
-        // raft_index_t last_idx = msg->prev_log_idx;
-        // raft_entry_t *ety = raft_get_entry_from_idx(raft, last_idx);
 
-        if (raft_get_forwarder(raft)){// && (!((match_idx < last_idx) && ety->type == RAFT_LOGTYPE_ADD_NONVOTING_NODE))) {
-            // Sending(send append entries)
-            sds joined_req_ids;
-            if (msg->n_entries > 0) {
-                sds* req_ids = malloc(sizeof(sds) * msg->n_entries);
-                for (i = 0; i < msg->n_entries; i++) {
-                    raft_entry_t *e = msg->entries[i];
-                    req_ids[i] = sdsfromlonglong(e->req_id);
-                }
-                joined_req_ids = sdsjoin(req_ids, msg->n_entries, ":");
-            } else {
-                joined_req_ids = sdsempty();
+    if (raft_get_forwarder(raft)) {
+        // Sending(send append entries)
+        sds joined_req_ids;
+        if (msg->n_entries > 0) {
+            sds *req_ids = malloc(sizeof(sds) * msg->n_entries);
+            for (i = 0; i < msg->n_entries; i++) {
+                raft_entry_t *e = msg->entries[i];
+                req_ids[i] = sdsfromlonglong(e->req_id);
             }
-            size_t cmd_len = 0;
-            sds cmd = InterpreteAE(raft, true, msg->msg_id, joined_req_ids, NULL, argv, argc, argvlen, &cmd_len);
-            raft_forward(raft, cmd, cmd_len);
-            sdsfree(cmd);
+            joined_req_ids = sdsjoin(req_ids, msg->n_entries, ":");
+            for (i = 0; i < msg->n_entries; i++) {
+                sdsfree(req_ids[i]);
+            }
+            free(req_ids);
+        } else {
+            joined_req_ids = sdsempty();
         }
+        size_t cmd_len = 0;
+        sds cmd = InterpreteAE(raft, true, msg->msg_id, joined_req_ids, NULL, argv, argc, argvlen, &cmd_len);
+        raft_forward(raft, cmd, cmd_len);
+        sdsfree(cmd);
+        sdsfree(joined_req_ids);
     }
     if (redisAsyncCommandArgv(ConnGetRedisCtx(node->conn), handleAppendEntriesResponse,
                               node, argc, (const char **) argv, argvlen) != REDIS_OK) {
@@ -987,18 +983,6 @@ static int raftApplyLog(raft_server_t *raft, void *user_data, raft_entry_t *entr
             RedisModule_ReplyWithArray(req->ctx, 2);
             RedisModule_ReplyWithLongLong(req->ctx, cfg->id);
             RedisModule_ReplyWithSimpleString(req->ctx, rr->snapshot_info.dbid);
-             if (raft_get_forwarder(rr->raft)) {
-//                 printf("send node add reply\n");
-//                 raft_add_node_req_t* req = raft_get_add_node_req_id(raft, cfg->id);
-//                 raft_index_t req_id = 0;
-//                 if (req != NULL) {
-//                     req_id = req->req_id;
-//                 }
-//                 sds cmd = InterpreteRaftNodeReply(raft, /*send=*/true, /*add=*/true, req_id, cfg->id, rr->snapshot_info.dbid, true);
-//                 size_t cmd_len = sdslen(cmd);
-//                 raft_forward(raft, cmd, cmd_len);
-//                 sdsfree(cmd);
-             }
             RaftReqFree(req);
             break;
         case RAFT_LOGTYPE_REMOVE_NODE:
@@ -1089,12 +1073,8 @@ static int raftNodeHasSufficientLogs(raft_server_t *raft, void *user_data, raft_
 
     raft_entry_req_t *entry = raft_entry_new(sizeof(RaftCfgChange));
     entry->id = rand();
-    raft_add_node_req_t* tmp_req = raft_get_add_node_req_id(raft, node->id);
-    raft_index_t req_id = 0;
-    if (tmp_req != NULL) {
-        req_id = tmp_req->req_id;
-    }
-    entry->req_id = req_id;
+    /* Node additions are not reported to the simulator (see cmdRaftNode). */
+    entry->req_id = 0;
     entry->type = RAFT_LOGTYPE_ADD_NODE;
 
     RaftCfgChange *cfgchange = (RaftCfgChange *) entry->data;
@@ -1102,7 +1082,6 @@ static int raftNodeHasSufficientLogs(raft_server_t *raft, void *user_data, raft_
     cfgchange->addr = node->addr;
 
     int e = raft_recv_entry(raft, entry, NULL);
-
     raft_entry_release(entry);
 
     return e;

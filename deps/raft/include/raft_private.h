@@ -135,12 +135,6 @@ struct raft_server {
 
     /* Forwarding to Simulator */
     forwarder_t *fwdr;
-
-    /* add node req id buffer */
-    raft_add_node_req_t **add_node_req_id;
-    raft_size_t req_array_size;
-    int num_added_nodes;
-
 };
 
 int raft_election_start(raft_server_t *me, int skip_precandidate);

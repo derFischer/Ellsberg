@@ -5,47 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Return the number of digits of 'v' when converted to string in radix 10.
- * Implementation borrowed from link in redis/src/util.c:string2ll(). */
-static uint32_t countDigits(uint64_t v) {
-    uint32_t result = 1;
-    for (;;) {
-        if (v < 10) return result;
-        if (v < 100) return result + 1;
-        if (v < 1000) return result + 2;
-        if (v < 10000) return result + 3;
-        v /= 10000U;
-        result += 4;
-    }
-}
-
-/* Helper that calculates the bulk length given a certain string length. */
-static size_t bulklen(size_t len) {
-    return 1 + countDigits(len) + 2 + len + 2;
-}
-
-sds DupAndReplaceSplitter(sds cmd, size_t total_len) {
-    sds dcmd = sdsempty();
-    dcmd = sdsdup(cmd);
-
-    if (total_len > 0) {
-        for (size_t i = 0; i < total_len; i++) {
-            if (dcmd[i] == '\0') {
-                dcmd[i] = '_';
-            }
-        }
-    }
-
-    int count = 0;
-    sds *split_dcmd = sdssplitlen(dcmd, sdslen(dcmd), "\r\n", 2, &count);
-    sds joined = sdsjoinsds(split_dcmd, count, "|", 1);
-
-    sdsfree(dcmd);
-    sdsfreesplitres(split_dcmd, count);
-
-    return joined;
-}
-
 void TranslateRMArgvOrUseCArgv(RedisModuleString **rmargv, char **cargv, int argc, const char **argv, int from) {
     if (argc == 0) {
         return;
@@ -80,16 +39,12 @@ InterpreteCmdRaft(raft_server_t *raft, bool send, size_t req_id, RedisModuleStri
     argv_tosend[0] = send ? "1" : "0";
     // msg_type: Client Request
     argv_tosend[1] = "1";
-    // TODO: msg_id
     sds req_id_sds = sdsfromlonglong(req_id);
     argv_tosend[2] = req_id_sds;
     // others
     TranslateRMArgvOrUseCArgv(rmargv, cargv, argc, argv_tosend, more_argc);
     redisFormatSdsCommandArgv(&cmd, argc_tosend, argv_tosend, NULL);
-
-//    sds replaced = DupAndReplaceSplitter(cmd, 0);
-//    printf("[%s] cmdRaft: < %s >\n", send ? "send" : "recv", replaced);
-//    sdsfree(replaced);
+    sdsfree(req_id_sds);
     free(argv_tosend);
 
     return cmd;
@@ -114,31 +69,17 @@ InterpreteCmdRaftReply(raft_server_t *raft, bool send, size_t req_id, RaftRedisC
     redisFormatSdsCommandArgv(&reqcmd_sds, used_argc, cmd_argv, NULL);
     char *reqcmd_str_start = strstr(reqcmd_sds, "\r\n") + 2;
 
-    if (reply_proto[0] == '$' || reply_proto[0] == '+') {
-        // Get will reply as bulk stirng, like "$5\r\nhello\r\n"
-        // Set will reply as "+OK\r\n"
-        argc_tosend += used_argc;
-        cmd = sdscatprintf(
-                cmd,
-                "*%ld\r\n" "$%ld\r\n%s\r\n" "$%ld\r\n%s\r\n" "$%ld\r\n%s\r\n" "%s",
-                argc_tosend, 1L, argv_tosend[0], 1L, argv_tosend[1], strlen(argv_tosend[2]), argv_tosend[2],
-                reqcmd_str_start);
-    } else if (reply_proto[0] == ':') {
-        // HSet will reply like ":10\r\n"
-        argc_tosend += used_argc;
-        cmd = sdscatprintf(
-                cmd,
-                "*%ld\r\n" "$%ld\r\n%s\r\n" "$%ld\r\n%s\r\n" "$%ld\r\n%s\r\n" "%s",
-                argc_tosend, 1L, argv_tosend[0], 1L, argv_tosend[1], strlen(argv_tosend[2]), argv_tosend[2],
-                reqcmd_str_start);
-    } else {
-        assert(false);
-    }
+    /* The record carries the request command (only its name for set/get),
+     * not the reply payload, so it has the same form for every reply type. */
+    argc_tosend += used_argc;
+    cmd = sdscatprintf(
+            cmd,
+            "*%ld\r\n" "$%ld\r\n%s\r\n" "$%ld\r\n%s\r\n" "$%ld\r\n%s\r\n" "%s",
+            argc_tosend, 1L, argv_tosend[0], 1L, argv_tosend[1], strlen(argv_tosend[2]), argv_tosend[2],
+            reqcmd_str_start);
 
-//     sds replaced = DupAndReplaceSplitter(cmd, 0);
-//     printf("[%s] cmdRaftReply: < %s >\n", send ? "send" : "recv", replaced);
-//     sdsfree(replaced);
-
+    sdsfree(reqcmd_sds);
+    free(cmd_argv);
     sdsfree(req_id_sds);
     free(argv_tosend);
 
@@ -160,10 +101,7 @@ InterpreteRaftNode(raft_server_t *raft, bool send, bool add, size_t req_id, Redi
     // others
     TranslateRMArgvOrUseCArgv(rmargv, cargv, argc, argv_tosend, more_argc);
     redisFormatSdsCommandArgv(&cmd, argc_tosend, argv_tosend, NULL);
-
-    // sds replaced = DupAndReplaceSplitter(cmd, 0);
-    // printf("[%s] RaftNode(%s): < %s >\n", send ? "send" : "recv", add ? "ADDVOTING" : "REMOVE", replaced);
-    // sdsfree(replaced);
+    sdsfree(req_id_sds);
     free(argv_tosend);
 
     return cmd;
@@ -193,10 +131,6 @@ sds InterpreteRaftNodeReply(raft_server_t *raft, bool send, bool add, size_t req
                 "*%ld\r\n" "$%ld\r\n%s\r\n" "$%ld\r\n%s\r\n" "$%ld\r\n%s\r\n" "$%ld\r\n%s",
                 4L, 1L, send_str, 1L, msg_type_str, strlen(req_id_sds), req_id_sds, strlen(node_id_str), node_id_str);
     }
-
-    // sds replaced = DupAndReplaceSplitter(cmd, 0);
-    // printf("[%s] RaftNodeReply(%s): < %s >\n", send ? "send" : "recv", add ? "ADD" : "REMOVE", replaced);
-    // sdsfree(replaced);
     sdsfree(req_id_sds);
     sdsfree(node_id_str);
 
@@ -221,31 +155,24 @@ InterpreteAE(raft_server_t *raft, bool send, raft_msg_id_t req_msg_id, sds joine
     TranslateRMArgvOrUseCArgv(rmargv, cargv, argc, argv_tosend, 3);
     argv_tosend[more_argc + argc - 1] = joined_req_ids;
 
-    // calculate `argvlen_tosend` and `total_len`
     argvlen_tosend[0] = 1;
     argvlen_tosend[1] = 1;
     argvlen_tosend[2] = strlen(req_msg_id_sds);
-    size_t total_len = 1 + countDigits(argc) + 2 + bulklen(1) + bulklen(1) + bulklen(argvlen_tosend[2]);
     for (int j = 0; j < argc; j++) {
         argvlen_tosend[3 + j] = argvlen[j];
-        total_len += bulklen(argvlen_tosend[3 + j]);
     }
     argvlen_tosend[more_argc + argc - 1] = strlen(joined_req_ids);
-    total_len += bulklen(argvlen_tosend[more_argc + argc - 1]);
 
     redisFormatSdsCommandArgv(&cmd, argc_tosend, argv_tosend, argvlen_tosend);
 
-    // sds replaced = DupAndReplaceSplitter(cmd, total_len);
-    // printf("[%s] cmdRaftAppendEntries: < %s >\n", send ? "send" : "recv", replaced);
-    // sdsfree(replaced);
-
+    sdsfree(req_msg_id_sds);
+    free(argvlen_tosend);
     free(argv_tosend);
-    *cmdlen = total_len;
+    *cmdlen = sdslen(cmd);
 
     return cmd;
 }
 
-// TODO: add argvlen
 sds InterpreteAER(
         raft_server_t *raft,
         bool send,
@@ -279,40 +206,10 @@ sds InterpreteAER(
 
     redisFormatSdsCommandArgv(&cmd, argc_tosend, argv_tosend, NULL);
 
-    // sds replaced = DupAndReplaceSplitter(cmd, 0);
-    // printf("[%s] cmdRaftAppendEntriesResponse: < %s >\n", send ? "send" : "recv", replaced);
-    // sdsfree(replaced);
-
     sdsfree((sds) argv_tosend[2]);
     sdsfree((sds) argv_tosend[4]);
     sdsfree((sds) argv_tosend[5]);
     sdsfree((sds) argv_tosend[6]);
-    free(argv_tosend);
-
-    return cmd;
-}
-
-sds InterpreteRV(raft_server_t *raft, bool send, raft_msg_id_t req_msg_id, RedisModuleString **rmargv, char **cargv,
-                 int argc) {
-    sds cmd;
-    int more_argc = 3;
-    const char **argv_tosend = (const char **) calloc(more_argc + argc, sizeof(char *));
-    int argc_tosend = argc + more_argc;
-    argv_tosend[0] = send ? "1" : "0";
-    // msg_type: RaftRequest
-    argv_tosend[1] = "4";
-    // TODO: msg_id
-    sds req_msg_id_sds = sdsfromlonglong(req_msg_id);
-    argv_tosend[2] = req_msg_id_sds;
-    // others
-    TranslateRMArgvOrUseCArgv(rmargv, cargv, argc, argv_tosend, more_argc);
-
-    redisFormatSdsCommandArgv(&cmd, argc_tosend, argv_tosend, NULL);
-
-    // sds replaced = DupAndReplaceSplitter(cmd, 0);
-    // printf("[%s] cmdRaftRequestVote: < %s >\n", send ? "send" : "recv", replaced);
-    // sdsfree(replaced);
-
     free(argv_tosend);
 
     return cmd;
@@ -323,7 +220,7 @@ sds InterpreteRVFormat(raft_server_t *raft, raft_node_t *raft_node, bool send, r
     char *ccmd;
     redisFormatCommand(&ccmd, "%d %d %d RAFT.REQUESTVOTE %d %d %d:%ld:%d:%ld:%ld",
                        send,
-                       3, // msg_type: RaftRequest
+                       4, // msg_type: RaftRequest
                        req_msg_id,
                        raft_node_get_id(raft_node),
                        raft_get_nodeid(raft),
@@ -335,10 +232,6 @@ sds InterpreteRVFormat(raft_server_t *raft, raft_node_t *raft_node, bool send, r
 
     sds cmd = sdsempty();
     cmd = sdscpy(cmd, ccmd);
-    // sds replaced = DupAndReplaceSplitter(cmd, 0);
-    // printf("[%s] cmdRaftRequestVote: < %s >\n", send ? "send" : "recv", replaced);
-    // sdsfree(replaced);
-
     free(ccmd);
 
     return cmd;
@@ -357,13 +250,13 @@ sds InterpreteRVR(
     const char **argv_tosend = (const char **) calloc(more_argc + argc, sizeof(char *));
     int argc_tosend = argc + more_argc;
     // send=false
-    argv_tosend[0] = send ? "1" : "0";;
+    argv_tosend[0] = send ? "1" : "0";
     // msg_type: RaftResponse
     argv_tosend[1] = "5";
     // TODO: msg_id
     sds req_msg_id_sds = sdsfromlonglong(req_msg_id);
     argv_tosend[2] = req_msg_id_sds;
-    // resp: RAFT.AER
+    // resp: RAFT.REQUESTVOTEREPLY
     argv_tosend[3] = "RAFT.REQUESTVOTEREPLY";
     // resp: dst_id
     argv_tosend[4] = sdsfromlonglong(dst_id);
@@ -376,10 +269,6 @@ sds InterpreteRVR(
     TranslateRMArgvOrUseCArgv(rmargv, cargv, argc, argv_tosend, more_argc);
 
     redisFormatSdsCommandArgv(&cmd, argc_tosend, argv_tosend, NULL);
-
-    // sds replaced = DupAndReplaceSplitter(cmd, 0);
-    // printf("[%s] cmdRaftRequestVoteResponse: < %s >\n", send ? "send" : "recv", replaced);
-    // sdsfree(replaced);
 
     sdsfree((sds) argv_tosend[2]);
     sdsfree((sds) argv_tosend[4]);

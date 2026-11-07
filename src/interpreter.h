@@ -21,7 +21,6 @@ sds InterpreteAER(
   raft_node_id_t src_id,
   RedisModuleString **argv, char **cargv, int argc);
 
-sds InterpreteRV(raft_server_t *raft, bool send, raft_msg_id_t req_msg_id, RedisModuleString **argv, char **cargv, int argc);
 char* InterpreteRVFormat(raft_server_t *raft, raft_node_t *raft_node, bool send, raft_msg_id_t req_msg_id, raft_requestvote_req_t* msg);
 
 sds InterpreteRVR(

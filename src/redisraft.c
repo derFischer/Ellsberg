@@ -144,21 +144,13 @@ static int cmdRaftNode(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
 
         raft_entry_req_t *entry = raft_entry_new(sizeof(cfg));
         entry->id = rand();
-        // raft_req_id_t req_id = raft_node_next_reqid(raft_get_my_node(rr->raft));
         entry->type = RAFT_LOGTYPE_ADD_NONVOTING_NODE;
         memcpy(entry->data, &cfg, sizeof(cfg));
         entryAttachRaftReq(rr, entry, req);
 
-        //for running: hack: will not send to simulator to pass the check
-        // if (raft_get_forwarder(rr->raft)) {
-        //     printf("recv node add (nonvoting), commit=%ld\n", raft_get_commit_idx(rr->raft));
-        //     // Sending(recv node add (nonvoting))
-        //     sds cmd = InterpreteRaftNode(rr->raft, false, /*add=*/true, /*req_id=*/req_id, argv, NULL, argc);
-        //     size_t cmd_len = sdslen(cmd);
-        //     raft_forward(rr->raft, cmd, cmd_len);
-        //     sdsfree(cmd);
-        //     raft_add_node_req(rr->raft, node_id, req_id);
-        // }
+        /* Node additions (RAFT.NODE ADD) are not reported to the simulator:
+         * the checker does not model the non-voting phase and treats the
+         * initial membership specially. */
         int e = raft_recv_entry(rr->raft, entry, NULL);
         if (e != 0) {
             entryDetachRaftReq(rr, entry);
@@ -206,8 +198,8 @@ static int cmdRaftNode(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
         if (raft_get_forwarder(rr->raft)) {
             // Sending(recv node remove)
             sds cmd = InterpreteRaftNode(rr->raft, false, /*add=*/false, /*req_id=*/entry->req_id, argv, NULL, argc);
-             size_t cmd_len = sdslen(cmd);
-             raft_forward(rr->raft, cmd, cmd_len);
+            size_t cmd_len = sdslen(cmd);
+            raft_forward(rr->raft, cmd, cmd_len);
             sdsfree(cmd);
         }
         int e = raft_recv_entry(rr->raft, entry, NULL);
@@ -900,11 +892,14 @@ static int cmdRaft(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
     RaftRedisCommand *cmd = RaftRedisCommandArrayExtend(&cmds);
     cmds.client_id = RedisModule_GetClientId(ctx);
 
-    cmds.req_id = raft_node_next_reqid(raft_get_my_node(rr->raft));
+    /* rr->raft is NULL until the cluster is initialized or joined; the
+     * request is then rejected by handleRedisCommand() below. */
+    raft_node_t *my_node = rr->raft ? raft_get_my_node(rr->raft) : NULL;
+    cmds.req_id = my_node ? raft_node_next_reqid(my_node) : 0;
     cmd->argc = argc - 1;
     cmd->argv = RedisModule_Alloc((argc - 1) * sizeof(RedisModuleString *));
 
-    if (raft_get_forwarder(rr->raft)) {
+    if (rr->raft && raft_get_forwarder(rr->raft)) {
         // Sending(recv client request)
         sds cmdsds = InterpreteCmdRaft(rr->raft, false, /*req_id=*/cmds.req_id, argv, NULL, argc);
         size_t cmdsds_len = sdslen(cmdsds);
@@ -1023,35 +1018,17 @@ static int cmdRaftAppendEntries(RedisModuleCtx *ctx, RedisModuleString **argv, i
         msg.entries = RedisModule_Calloc(n_entries, sizeof(raft_entry_t));
     }
 
-    size_t *argvlen = NULL;
-    argvlen = RedisModule_Alloc(sizeof(argvlen[0]) * argc);
-    tmpstr = RedisModule_StringPtrLen(argv[0], &tmplen);
-    argvlen[0] = tmplen;
-    tmpstr = RedisModule_StringPtrLen(argv[1], &tmplen);
-    argvlen[1] = tmplen;
-    tmpstr = RedisModule_StringPtrLen(argv[2], &tmplen);
-    argvlen[2] = tmplen;
-    tmpstr = RedisModule_StringPtrLen(argv[3], &tmplen);
-    argvlen[3] = tmplen;
-    tmpstr = RedisModule_StringPtrLen(argv[4], &tmplen);
-    argvlen[4] = tmplen;
     for (int i = 0; i < n_entries; i++) {
         /* Create entry with payload */
         tmpstr = RedisModule_StringPtrLen(argv[6 + 2 * i], &tmplen);
         raft_entry_t *e = raft_entry_new(tmplen);
         memcpy(e->data, tmpstr, tmplen);
-        {
-            argvlen[6+2*i] = tmplen;
-        }
 
         /* Parse additional entry fields */
         tmpstr = RedisModule_StringPtrLen(argv[5 + 2 * i], &tmplen);
         if (sscanf(tmpstr, "%ld:%d:%llu:%d", &e->term, &e->id, &e->session, &e->type) != 4) {
             RedisModule_ReplyWithError(ctx, "invalid entry");
             goto out;
-        }
-        {
-            argvlen[5+2*i] = tmplen;
         }
         msg.entries[i] = e;
     }
@@ -1061,11 +1038,6 @@ static int cmdRaftAppendEntries(RedisModuleCtx *ctx, RedisModuleString **argv, i
 
     raft_appendentries_resp_t resp = {0};
     raft_node_t *node = raft_get_node(rr->raft, src_node_id);
-
-    // if (rr->config.id != 1 && src_node_id == 1 && 3 <= msg.prev_log_idx + n_entries && msg.prev_log_idx + n_entries <= 5) {
-    //     printf("\033[1;31mskip appendentries from 1\033[0m\n");
-    //     sleep(3);
-    // }
 
     if (raft_recv_appendentries(rr->raft, node, &msg, &resp) != 0) {
         RedisModule_ReplyWithError(ctx, "ERR operation failed");
@@ -1192,9 +1164,6 @@ static void clusterInit(const char *cluster_id)
 
     /* This is the first node, so there are no used node ids yet */
     rr->snapshot_info.used_node_ids = NULL;
-    
-    LOG_NOTICE("Raft Cluster initialized, node id: %d, dbid: %s",
-               rr->config.id, rr->snapshot_info.dbid);
 
     /* If node id was not specified, make up one */
     if (!rr->config.id) {

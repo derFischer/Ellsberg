@@ -1,93 +1,139 @@
-# RedisRaft
+# RedisRaft for Ellsberg
 
-> :warning: RedisRaft is still being developed and is not yet ready for any real production use. Please do not use it for any mission critical purpose at this time.
+This is the RedisRaft used in the evaluation of *Ellsberg* (NSDI '25). It is
+upstream [RedisRaft](https://github.com/RedisLabs/redisraft) at commit
+`49b292c` (2023-01-19), including its bundled Raft library (`deps/raft`), with
+changes that report the Raft messages each node sends and receives, and the
+client requests and replies it handles, either to the simulator or to log
+files.
 
-### Strongly-Consistent Redis Deployments
+The original RedisRaft README is kept in [README-redisraft.md](README-redisraft.md).
 
-RedisRaft is a Redis module that implements the [Raft Consensus
-Algorithm](https://raft.github.io/), making it possible to create strongly-consistent clusters of Redis servers.
+## Build
 
-The Raft algorithm is provided by a [standalone Raft
-library](https://github.com/willemt/raft) by Willem-Hendrik Thiart.
+Requires a C compiler, CMake, GNU make and GNU autotools.
 
-## Main Features
+```sh
+mkdir build && cd build
+cmake ..
+make
+```
 
-* Strong consistency (in the language of [CAP](https://en.wikipedia.org/wiki/CAP_theorem), this system prioritizes consistency and partition-tolerance).
-* Support for most Redis data types and commands
-* Dynamic cluster configuration (adding / removing nodes)
-* Snapshots for log compaction
-* Configurable quorum or fast reads
+`redisraft.so` is created in the project directory. The default build type is
+`Release`.
 
-## Getting Started
+RedisRaft also needs a Redis server built from source; the experiments used
+Redis commit `cd58af4d7fe4b506899591b2846cfba61335c958`:
 
-### Building
+```sh
+git clone https://github.com/redis/redis && cd redis
+git checkout cd58af4d7fe4b506899591b2846cfba61335c958
+make && make install
+```
 
-To compile the module, you will need:
-* Build essentials (a compiler, GNU make, etc.)
-* CMake
-* GNU autotools (autoconf, automake, libtool).
+## Run
 
-To build:
+Start each member with the environment variables described below, then create
+the cluster. A 3-member cluster on one machine, writing message logs to files:
 
-    git clone https://github.com/RedisLabs/redisraft.git
-    cd redisraft
-    mkdir build && cd build
-    cmake ..
-    make
+```sh
+for i in 1 2 3; do
+  SIMMODE=FILE IID=$i redis-server --port 500$i --dbfilename raft$i.rdb \
+    --loadmodule $PWD/redisraft.so \
+    --raft.log-filename raftlog$i.db --raft.addr localhost:500$i --raft.id $i &
+done
+redis-cli -p 5001 RAFT.CLUSTER INIT
+redis-cli -p 5002 RAFT.CLUSTER JOIN localhost:5001
+redis-cli -p 5003 RAFT.CLUSTER JOIN localhost:5001
+```
 
-`redisraft.so` will be created under the project directory.
+Clients send requests to the leader (member 1 after `INIT`). The checker
+supports `SET` and `GET`.
 
-### Creating a RedisRaft Cluster
+## Configuration
 
-RedisRaft requires Redis build from the 'unstable' branch. Build Redis first:
-    
-    git clone https://github.com/redis/redis  
-    cd redis
-    make 
-    make install
+Message reporting is configured through environment variables, read when the
+Raft instance is created (`deps/raft/src/raft_forwarder.c`).
 
-To create a three-node cluster, start the first node:
+| Variable | Values | Default | Meaning |
+|---|---|---|---|
+| `SIMMODE` | `NONE`, `ASYNC`, `SYNC`, `FILE` | `NONE` | Where messages are reported (below). |
+| `SIMCONNTYPE` | `UNIX` | `UNIX` | How to connect to the simulator. Only Unix domain sockets are supported. |
+| `IID` | any string, unique per member | — | Instance ID; used in socket and log file names. Required unless `SIMMODE` is `NONE`. If `--raft.id` is not given, it is also used as the Raft node ID. |
 
-    redis-server \
-        --port 5001 --dbfilename raft1.rdb \
-        --loadmodule <path-to>/redisraft.so \
-        --raft.log-filename raftlog1.db \
-        --raft.addr localhost:5001
+`SIMMODE`:
 
-Then initialize the cluster:
+- `NONE`: no reporting; RedisRaft with the changes listed under
+  [Deviations from RedisRaft](#deviations-from-redisraft).
+- `ASYNC`, `SYNC`: send each message to the simulator. Both behave the same:
+  the member writes each message to the socket and does not wait for a reply.
+- `FILE`: write messages to log files; no simulator.
 
-    redis-cli -p 5001 raft.cluster init
+Messages are reported on Redis's main thread; each write blocks until it
+completes.
 
-Now start the second node, and run the `RAFT.CLUSTER JOIN` command to join it to the existing cluster:
+### Hard-coded paths
 
-    redis-server \
-        --port 5002 --dbfilename raft2.rdb \
-        --loadmodule <path-to>/redisraft.so \
-        --raft.log-filename raftlog2.db \
-        --raft.addr localhost:5002
+Simulator connection (`ASYNC`, `SYNC`): the member binds the Unix socket
+`/tmp/client.<IID>.sock` and connects to `/tmp/server.<IID>.sock`, which the
+simulator must create. If the connection fails, the member exits.
 
-    redis-cli -p 5002 RAFT.CLUSTER JOIN localhost:5001
+Log files (`FILE`) go to `/tmp/log/log<YYYYMMDD-HHMMSS>/`, named after the time
+the Raft instance was created:
 
-Now add the third node in the same way:
+- `messages.<IID>.<time>.data`: the reported messages.
+- `messages.<IID>.<time>.meta`: two lines, the cumulative number of messages
+  written when the data file was opened and when it was closed.
 
-    redis-server \
-        --port 5003 --dbfilename raft3.rdb \
-        --loadmodule <path-to>/redisraft.so \
-        --raft.log-filename raftlog3.db 
-        --raft.addr localhost:5003
+The member starts a new `.data`/`.meta` pair every second. The `.meta` file is
+written when its data file is closed, so the newest pair is incomplete while
+the member runs, and is lost if the member is killed.
 
-    redis-cli -p 5003 RAFT.CLUSTER JOIN localhost:5001
+### Message format
 
-To query the cluster state, run the `INFO raft` command:
+Each record, in a file or on the socket, is an 8-byte length (native byte
+order, little-endian on x86) followed by a RESP array: `[send, type, id, ...]`.
 
-    redis-cli -p 5001 INFO raft
+- `send`: `1` if the member sent the message, `0` if it received it.
+- `type`: `1` client request, `2` successful client reply, `3` failed client
+  reply, `4` Raft request (AppendEntries, RequestVote), `5` Raft response.
+- `id`: the request ID for client requests and replies; the message ID for
+  Raft messages (`0` where RedisRaft does not track one).
+- The rest is the command or message. For lowercase `set` and `get`, only the
+  command name is included, not the key and value.
 
-Now you can start using this RedisRaft cluster. All [supported Redis commands](docs/Using.md) will be executed in a strongly-consistent manner using the Raft protocol.
+What is reported:
 
-## Documentation
+| Message | Reported by |
+|---|---|
+| Client request (`RAFT <command>`) | the member receiving it |
+| Client reply | the leader, before replying |
+| `RAFT.NODE REMOVE` request and reply | the member receiving it (the leader) |
+| AppendEntries | the sender (with the request IDs of its entries) |
+| AppendEntries response | the sender (with the request it answers) and the receiver |
+| RequestVote (not prevote) | the sender |
+| RequestVote response | the sender (not for prevote) and the receiver |
 
-Please consult the [documentation](docs/TOC.md) for more information.
+Not reported: `RAFT.NODE ADD` and the non-voting phase of a new member,
+snapshots, and error replies to clients (for example redirects to the leader).
 
-## License
+## Deviations from RedisRaft
 
-RedisRaft is licensed under the [Redis Source Available License 2.0 (RSALv2)](https://redis.com/legal/rsalv2-agreement) or the [Server Side Public License v1 (SSPLv1)](https://www.mongodb.com/licensing/server-side-public-license).
+**Behavior**
+
+| Where | Change |
+|---|---|
+| `src/raft.c` `RaftLibraryInit` | `RAFT_CONFIG_AUTO_FLUSH` is `1` (upstream: `0`). Each new entry is written and fsynced, and AppendEntries are sent, immediately on the main thread, instead of being batched in `handleBeforeSleep`. |
+| `deps/raft/src/raft_server.c` `raft_apply_all` | Before applying committed entries, the leader sends AppendEntries to every follower that is missing entries or has not yet been sent a message covering the newest pending read request. |
+| `CMakeLists.txt` | The default build type is `Release` (upstream: `RelWithDebInfo`). |
+| `src/redisraft.c` `clusterInit` | Uses `IID` as the node ID when `--raft.id` is not given. |
+
+**Reporting**
+
+| Where | Change |
+|---|---|
+| `deps/raft/src/raft_forwarder.c`, `deps/raft/include/raft_forwarder.h` | Simulator connection and log files (new). |
+| `src/interpreter.c`, `src/interpreter.h` | Encode messages for the simulator (new). |
+| `src/raft.c`, `src/redisraft.c` | Reporting hooks for client requests and replies, AppendEntries, RequestVote and `RAFT.NODE REMOVE`. |
+| `deps/raft/include/raft.h`, `deps/raft/src/raft_node.c` | Each log entry carries the request ID of the client request that created it. IDs are generated by the member that receives the request; they are not sent between members or stored in the log, so entries on followers and entries read back from disk have request ID `0`. |
+| `deps/raft/src/raft_server.c`, `raft_server_properties.c`, `include/raft_private.h` | The Raft instance owns the forwarder. |

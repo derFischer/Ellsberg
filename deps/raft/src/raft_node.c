@@ -13,7 +13,6 @@
 #include "raft_private.h"
 
 #include <sys/time.h>
-#include <unistd.h>
 #include <stdatomic.h>
 
 #define RAFT_NODE_VOTED_FOR_ME        (1 << 0)
@@ -48,8 +47,6 @@ struct raft_node {
     /* req id */
     raft_req_id_t reqid_prefix;
     atomic_uint_fast64_t reqid_suffix;
-    raft_req_id_t next_reqid;
-
 };
 
 raft_node_t *raft_node_new(void *udata, raft_node_id_t id, int voting)
@@ -82,7 +79,6 @@ void raft_node_free(raft_node_t *node)
 }
 
 raft_req_id_t raft_node_next_reqid(raft_node_t *node) {
-    // TODO: use atomic add
     raft_req_id_t old_suffix = atomic_fetch_add(&(node->reqid_suffix), 1);
     raft_req_id_t next_suffix = ((old_suffix + 1) << (REQ_ID_SIZE - SUFFIXLEN)) >> (REQ_ID_SIZE - SUFFIXLEN);
     return node->reqid_prefix | next_suffix;

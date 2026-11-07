@@ -13,36 +13,6 @@
 #include "raft.h"
 #include "raft_private.h"
 
-raft_add_node_req_t* raft_get_add_node_req_id (raft_server_t *me, raft_node_id_t id)
-{
-    for (int i = 0; i < me->num_added_nodes; i++) {
-        if(me->add_node_req_id[i]->node_id == id) {
-            return me->add_node_req_id[i];
-        }
-    }
-    return NULL;
-}
-
-void raft_add_node_req(raft_server_t *me, raft_node_id_t id, raft_req_id_t reqid)
-{
-    raft_add_node_req_t* req = raft_get_add_node_req_id(me, id);
-    if (req != NULL) {
-        req->req_id = reqid;
-        return;
-    }
-    req = malloc(sizeof(raft_add_node_req_t));
-    req->node_id = id;
-    req->req_id = reqid;
-    if (me->num_added_nodes == me->req_array_size) {
-        raft_add_node_req_t **new_array = malloc(sizeof(raft_add_node_req_t*) * me->req_array_size * 2);
-        memset(new_array, 0, sizeof(raft_add_node_req_t*) * me->req_array_size * 2);
-        memcpy(new_array, me->add_node_req_id, sizeof(raft_add_node_req_t*) * me->req_array_size);
-        me->add_node_req_id = new_array;
-        me->req_array_size = me->req_array_size * 2;
-    }
-    me->add_node_req_id[(me->num_added_nodes)++] = req;
-}
-
 forwarder_t *raft_get_forwarder(raft_server_t *me)
 {
     return me->fwdr;

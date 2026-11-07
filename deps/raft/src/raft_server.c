@@ -114,11 +114,6 @@ raft_server_t* raft_new_with_log(const raft_log_impl_t *log_impl, void *log_arg)
 
     me->fwdr = forwarder_new();
 
-    me->req_array_size = 5;
-    me->num_added_nodes = 0;
-    me->add_node_req_id = malloc(sizeof(raft_add_node_req_t) * me->req_array_size);
-    memset(me->add_node_req_id, 0, sizeof(raft_add_node_req_t) * me->req_array_size);
-
     raft_update_quorum_meta(me, me->msg_id);
 
     raft_randomize_election_timeout(me);
@@ -1564,6 +1559,7 @@ int raft_send_appendentries(raft_server_t *me, raft_node_t *node)
         }
 
         raft_index_t next_idx = raft_node_get_next_idx(node);
+
         raft_appendentries_req_t req = {
             .term = me->current_term,
             .leader_id = raft_get_nodeid(me),
@@ -1690,7 +1686,7 @@ int raft_apply_all(raft_server_t *me)
             raft_send_appendentries(me, me->nodes[i]);
         }
     }
-    
+
     while (me->commit_idx > me->last_applied_idx) {
         if (raft_time_millis(me) > me->exec_deadline) {
             me->pending_operations = 1;
