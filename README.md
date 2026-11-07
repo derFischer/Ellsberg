@@ -112,7 +112,7 @@ What is reported:
 | AppendEntries | the sender (with the request IDs of its entries) |
 | AppendEntries response | the sender (with the request it answers) and the receiver |
 | RequestVote (not prevote) | the sender |
-| RequestVote response | the sender (not for prevote) and the receiver |
+| RequestVote response (not prevote) | the sender and the receiver |
 
 Not reported: `RAFT.NODE ADD` and the non-voting phase of a new member,
 snapshots, and error replies to clients (for example redirects to the leader).

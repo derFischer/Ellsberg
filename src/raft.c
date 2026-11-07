@@ -710,7 +710,7 @@ static void handleRequestVoteResponse(redisAsyncContext *c, void *r, void *privd
         return;
     }
 
-    if (raft_get_forwarder(rr->raft)) {
+    if (raft_get_forwarder(rr->raft) && response.prevote == 0) {
         // Sending(recv requestvote response)
         sds cmd = InterpreteRVR(rr->raft, false, /*TODO: msg_id=*/0, &response, /*dst_id=*/raft_get_nodeid(rr->raft), /*src_id=*/raft_node_get_id(raft_node), NULL, NULL, 0);
         size_t cmd_len = sdslen(cmd);
@@ -799,7 +799,7 @@ static void handleAppendEntriesResponse(redisAsyncContext *c, void *r, void *pri
     };
 
     raft_node_t *raft_node = raft_get_node(rr->raft, node->id);
-    if (raft_get_forwarder(rr->raft)) {
+    if (raft_get_forwarder(rr->raft) && raft_node) {
         // Sending(recv appendentries response)
         sds cmd = InterpreteAER(rr->raft, false, /*TODO: msg_id=*/0, &response, /*dst_id=*/raft_get_nodeid(rr->raft), /*src_id=*/raft_node_get_id(raft_node), NULL, NULL, 0);
         size_t cmd_len = sdslen(cmd);
