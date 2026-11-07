@@ -90,6 +90,10 @@ func (enc *msgAppV2Encoder) encode(m *raftpb.Message) error {
 		if _, err := enc.w.Write(enc.uint8buf); err != nil {
 			return err
 		}
+	// Ellsberg: the compact msgTypeAppEntries encoding sends only the entries
+	// and commit index and drops Context. Heartbeats are now sent as MsgApp
+	// and carry the ReadIndex context in Context, so such messages must use
+	// the full msgTypeApp encoding below.
 	case enc.index == m.Index && enc.term == m.LogTerm && m.LogTerm == m.Term && len(m.Context) == 0:
 		enc.uint8buf[0] = msgTypeAppEntries
 		if _, err := enc.w.Write(enc.uint8buf); err != nil {

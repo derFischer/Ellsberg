@@ -266,8 +266,6 @@ type EtcdServer struct {
 	peerRt   http.RoundTripper
 	reqIDGen *idutil.Generator
 
-	reqSLROIDGen *idutil.Generator
-
 	// forceVersionC is used to force the version monitor loop
 	// to detect the cluster version immediately.
 	forceVersionC chan struct{}
@@ -486,6 +484,10 @@ func NewServer(cfg ServerConfig) (srv *EtcdServer, err error) {
 	lstats := stats.NewLeaderStats(cfg.Logger, id.String())
 
 	heartbeat := time.Duration(cfg.TickMs) * time.Millisecond
+	// Ellsberg: connection used to report client requests/replies and Raft
+	// messages to the simulator or to log files. Configured via the SIMMODE
+	// (NONE|SYNC|ASYNC|FILE|SYNCANDFILE), SIMCONNTYPE (TCP|UNIX|PIPE) and IID
+	// environment variables; it is nil when SIMMODE=NONE. See package comm.
 	usedSlConn := new(comm.RPCConnection).Init(uint64(id), types.IDToUINT(cl.MemberIDs()))
 
 	n.SetSlConn(usedSlConn)
@@ -517,7 +519,6 @@ func NewServer(cfg ServerConfig) (srv *EtcdServer, err error) {
 		SyncTicker:       time.NewTicker(500 * time.Millisecond),
 		peerRt:           prt,
 		reqIDGen:         idutil.NewGenerator(uint16(id), time.Now()),
-		reqSLROIDGen:     idutil.NewGenerator(uint16(id), time.Now()),
 		forceVersionC:    make(chan struct{}),
 		AccessController: &AccessController{CORS: cfg.CORS, HostWhitelist: cfg.HostWhitelist},
 		consistIndex:     cindex.NewConsistentIndex(be.BatchTx()),
@@ -844,8 +845,10 @@ func (s *EtcdServer) Process(ctx context.Context, m raftpb.Message) error {
 	if m.Type == raftpb.MsgApp {
 		s.stats.RecvAppendReq(types.ID(m.From).String(), m.Size())
 	}
+	// Ellsberg: report the receipt of a Raft response (MsgAppResp,
+	// MsgVoteResp, MsgReadIndexResp) to the simulator before stepping it into
+	// the local Raft node. Sends are reported in raft.send.
 	if m.Type == raftpb.MsgAppResp || m.Type == raftpb.MsgVoteResp || m.Type == raftpb.MsgReadIndexResp {
-		// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.RaftRequest, Msg: messagepb.RaftMsg{Msg: m, Req: nil}})
 		if s.slConn != nil {
 			length := 8*3 + (uint64)(m.Size()) + 8 + 0
 			reqId, tosend, offset := s.slConn.AllocateRequest(length)
@@ -1755,8 +1758,8 @@ func (s *EtcdServer) configure(ctx context.Context, cc raftpb.ConfChange) ([]*me
 	cc.ID = s.reqIDGen.Next()
 	ch := s.w.Register(cc.ID)
 
-	// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.ClientRequest, Msg: messagepb.ClientReq{Req: &cc, ID: cc.ID}})
-
+	// Ellsberg: report the membership-change request to the simulator as a
+	// client request (kind 2 = ConfChange) before proposing it.
 	if s.slConn != nil {
 		length := 8*3 + 8 + 8 + (uint64)(cc.Size())
 		reqId, tosend, offset := s.slConn.AllocateRequest(length)

@@ -177,7 +177,8 @@ func (c *RPCConnection) Init(myId uint64, ids []uint64) *RPCConnection {
 					if err != nil {
 						panic(fmt.Sprintf("Read from conn failed, err:%v\n", err))
 					}
-					if pos+n == len(bytes) {
+					pos += n
+					if pos == len(bytes) {
 						break
 					}
 				}

@@ -340,6 +340,13 @@ func (r *raftNode) processMessages(ms []raftpb.Message) []raftpb.Message {
 			ms[i].To = 0
 		}
 
+		// Ellsberg: upstream keeps only the last MsgAppResp in each batch and
+		// drops the rest. Here every MsgApp must get its own MsgAppResp, so
+		// that what goes on the wire matches the request/response pairs
+		// reported to the simulator. Only responses carrying a ReadIndex
+		// context (replies to heartbeats, which are sent as MsgApp) are still
+		// deduplicated: the leader acknowledges all earlier pending reads when
+		// it gets an ack for the latest context.
 		if ms[i].Type == raftpb.MsgAppResp && len(ms[i].Context) != 0 {
 			if sentAppResp {
 				ms[i].To = 0

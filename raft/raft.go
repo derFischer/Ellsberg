@@ -396,8 +396,6 @@ func (r *raft) setSlConn(slConn *comm.RPCConnection) { r.slConn = slConn }
 
 func (r *raft) IsLeader() bool { return r.state == StateLeader }
 
-func (r *raft) isFollower() bool { return r.state == StateFollower }
-
 func (r *raft) hasLeader() bool { return r.lead != None }
 
 func (r *raft) softState() *SoftState { return &SoftState{Lead: r.lead, RaftState: r.state} }
@@ -411,6 +409,17 @@ func (r *raft) hardState() pb.HardState {
 }
 
 // send persists state to stable storage and then sends to its mailbox.
+//
+// Ellsberg: send additionally reports Raft messages to the simulator/log
+// (r.slConn, see package comm) before they leave the node. args is the
+// request a message responds to, or nil if m is itself a request:
+//   - args == nil: MsgApp, MsgVote and MsgReadIndex are reported as requests.
+//   - args != nil: MsgAppResp, MsgVoteResp and MsgReadIndexResp are reported
+//     together with the request (args) they answer, so the checker can pair
+//     every response with its request.
+//
+// Other message types (heartbeats, pre-votes, proposals, snapshots, ...) are
+// not reported. Each report blocks until the simulator acknowledges it.
 func (r *raft) send(args interface{}, m pb.Message) {
 	if m.From == None {
 		m.From = r.id
@@ -446,7 +455,6 @@ func (r *raft) send(args interface{}, m pb.Message) {
 
 	if args == nil {
 		if m.Type == pb.MsgApp || m.Type == pb.MsgVote || m.Type == pb.MsgReadIndex {
-			// messagepb.Sending(r.SLmsg, messagepb.Msg{Send: true, Type: messagepb.RaftRequest, Msg: messagepb.RaftMsg{Msg: m, Req: args}})
 
 			if r.slConn != nil {
 				length := 8*3 + (uint64)(m.Size()) + 8 + 0
@@ -463,7 +471,6 @@ func (r *raft) send(args interface{}, m pb.Message) {
 		}
 	} else {
 		if m.Type == pb.MsgAppResp || m.Type == pb.MsgVoteResp || m.Type == pb.MsgReadIndexResp {
-			// messagepb.Sending(r.SLmsg, messagepb.Msg{Send: true, Type: messagepb.RaftResp, Msg: messagepb.RaftMsg{Msg: m, Req: args}})
 			if r.slConn != nil {
 				req := args.(pb.Message)
 				length := 8*3 + (uint64)(m.Size()) + 8 + (uint64)(req.Size())
@@ -504,7 +511,9 @@ func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 	m.To = to
 
 	term, errt := r.raftLog.term(pr.Next - 1)
-	// ents, erre := r.raftLog.entries(pr.Next, r.maxMsgSize)
+	// Ellsberg: as in the Raft spec, an AppendEntries carries every entry
+	// from Next to the end of the leader's log, instead of being cut at
+	// maxMsgSize (upstream: r.raftLog.entries(pr.Next, r.maxMsgSize)).
 	ents, erre := r.raftLog.entries(pr.Next, math.MaxUint64)
 	if len(ents) == 0 && !sendIfEmpty {
 		return false
@@ -566,7 +575,17 @@ func (r *raft) sendHeartbeat(to uint64, ctx []byte) {
 	// or it might not have all the committed entries.
 	// The leader MUST NOT forward the follower's commit to
 	// an unmatched index.
-	// commit := min(r.prs.Progress[to].Match, r.raftLog.committed)
+	//
+	// Ellsberg: the Raft spec has no separate heartbeat message; a heartbeat
+	// is an AppendEntries with no entries. So instead of MsgHeartbeat we send
+	// an empty MsgApp whose previous index/term are the leader's last log
+	// index/term. Because the follower now runs the normal log-matching check
+	// (and maybeAppend only commits up to the last matched index), it is safe
+	// to send the full commit index rather than min(Match, committed). The
+	// ReadIndex context that upstream puts on heartbeats is carried in
+	// Context; the matching MsgAppResp is handled in stepLeader.
+	//
+	// upstream: commit := min(r.prs.Progress[to].Match, r.raftLog.committed)
 	m := pb.Message{
 		To:      to,
 		Type:    pb.MsgApp,
@@ -690,7 +709,6 @@ func (r *raft) reset(term uint64) {
 
 func (r *raft) appendEntry(es ...pb.Entry) (accepted bool) {
 	li := r.raftLog.lastIndex()
-	// fmt.Printf("server appends entry %+v to local log, last index: %+v\n", es, li)
 	for i := range es {
 		es[i].Term = r.Term
 		es[i].Index = li + 1 + uint64(i)
@@ -716,13 +734,10 @@ func (r *raft) appendEntry(es ...pb.Entry) (accepted bool) {
 func (r *raft) tickElection() {
 	r.electionElapsed++
 
-	// hack: reconfig
-	// if (r.id == 0xc7650337f7e099ff && r.Term == 1) || (r.id == 0xb5aa32b3a17abb1c && r.Term == 2) {
 	if r.promotable() && r.pastElectionTimeout() {
 		r.electionElapsed = 0
 		r.Step(pb.Message{From: r.id, Type: pb.MsgHup})
 	}
-	// }
 }
 
 // tickHeartbeat is run by leaders to send a MsgBeat after r.heartbeatTimeout.
@@ -890,9 +905,6 @@ func (r *raft) poll(id uint64, t pb.MessageType, v bool) (granted int, rejected 
 }
 
 func (r *raft) Step(m pb.Message) error {
-	// if m.Type != pb.MsgHeartbeat && m.Type != pb.MsgHeartbeatResp && m.Type != pb.MsgBeat && m.Type != pb.MsgCheckQuorum {
-	// 	r.logger.Infof("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!%x receives msg, log length: %d, current state: %d, message: %+v\n", r.id, r.raftLog.lastIndex(), r.state, m)
-	// }
 	// Handle the message term, which may result in our stepping down to a follower.
 	switch {
 	case m.Term == 0:
@@ -951,6 +963,11 @@ func (r *raft) Step(m pb.Message) error {
 			// with "pb.MsgAppResp" of higher term would force leader to step down.
 			// However, this disruption is inevitable to free this stuck node with
 			// fresh election. This can be prevented with Pre-Vote phase.
+			//
+			// Ellsberg: upstream sends this MsgAppResp without Reject; it only
+			// exists to tell the stale leader about the higher term. In the
+			// spec a non-rejecting AppendEntries response means success, so we
+			// mark it as a rejection to keep the response semantics consistent.
 			r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Reject: true})
 		} else if m.Type == pb.MsgPreVote {
 			// Before Pre-Vote enable, there may have candidate with higher term,
@@ -1067,14 +1084,11 @@ func stepLeader(r *raft, m pb.Message) error {
 		//
 		// TODO(tbg): I added a TODO in removeNode, it doesn't seem that the
 		// leader steps down when removing itself. I might be missing something.
-
-		//hack: delete this part
 		if pr := r.prs.Progress[r.id]; pr != nil {
 			pr.RecentActive = true
 		}
 		if !r.prs.QuorumActive() {
 			r.logger.Warningf("%x stepped down to follower since quorum is not active", r.id)
-			// hack: stale read (correct version should include becomeFollower)
 			r.becomeFollower(r.Term, None)
 		}
 		// Mark everyone (but ourselves) as inactive in preparation for the next
@@ -1084,13 +1098,8 @@ func stepLeader(r *raft, m pb.Message) error {
 				pr.RecentActive = false
 			}
 		})
-
 		return nil
 	case pb.MsgProp:
-		// reque := new(etcdserverpb.InternalRaftRequest)
-		// reque.Unmarshal(m.Entries[0].Data)
-		// r.logger.Infof("%x receives propose %+v\n", r.id, reque)
-		// fmt.Printf("raft receives new prop: %+v\n", m)
 		if len(m.Entries) == 0 {
 			r.logger.Panicf("%x stepped empty MsgProp", r.id)
 		}
@@ -1189,6 +1198,11 @@ func stepLeader(r *raft, m pb.Message) error {
 	}
 	switch m.Type {
 	case pb.MsgAppResp:
+		// Ellsberg: heartbeats are sent as empty MsgApp (see sendHeartbeat),
+		// so MsgAppResp also takes over what upstream does on
+		// MsgHeartbeatResp: clear ProbeSent, free an inflight slot when the
+		// window is full, and count the response as a ReadIndex ack when it
+		// carries a read context.
 		pr.RecentActive = true
 		pr.ProbeSent = false
 
@@ -1263,7 +1277,6 @@ func stepLeader(r *raft, m pb.Message) error {
 			}
 		}
 	case pb.MsgHeartbeatResp:
-		// fmt.Printf("leader receive heartbeat!!!! raft side!!!!\n")
 		pr.RecentActive = true
 		pr.ProbeSent = false
 
@@ -1397,6 +1410,9 @@ func stepCandidate(r *raft, m pb.Message) error {
 	case pb.MsgTimeoutNow:
 		r.logger.Debugf("%x [term %d state %v] ignored MsgTimeoutNow from %x", r.id, r.Term, r.state, m.From)
 	case pb.MsgReadIndex:
+		// Ellsberg: reads are served only by the leader. Upstream silently
+		// ignores MsgReadIndex here, leaving the read to time out; we reject
+		// it right away instead.
 		return ErrProposalDropped
 	}
 	return nil
@@ -1405,7 +1421,6 @@ func stepCandidate(r *raft, m pb.Message) error {
 func stepFollower(r *raft, m pb.Message) error {
 	switch m.Type {
 	case pb.MsgProp:
-		// r.logger.Infof("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!%x receives prop request, log length: %d\n", r.id, r.raftLog.lastIndex())
 		if r.lead == None {
 			r.logger.Infof("%x no leader at term %d; dropping proposal", r.id, r.Term)
 			return ErrProposalDropped
@@ -1413,7 +1428,16 @@ func stepFollower(r *raft, m pb.Message) error {
 			r.logger.Infof("%x not forwarding to leader %x at term %d; dropping proposal", r.id, r.lead, r.Term)
 			return ErrProposalDropped
 		}
-		if r.raftLog.lastIndex() < 9 {
+		// Ellsberg: the checker assumes every log entry after bootstrap comes
+		// from a client request accepted by the leader (etcdserver rejects
+		// client proposals on followers with ErrNotLeader). During cluster
+		// bootstrap, however, each follower must publish its member
+		// attributes via a v2 request that bypasses that check and reaches
+		// raft as a MsgProp, which has to be forwarded to the leader or the
+		// follower can never finish joining. We therefore forward proposals
+		// only while the log is still within the bootstrap prefix, and drop
+		// them afterwards.
+		if r.raftLog.lastIndex() <= r.bootstrapLogLen() {
 			m.To = r.lead
 			r.send(nil, m)
 		} else {
@@ -1449,13 +1473,9 @@ func stepFollower(r *raft, m pb.Message) error {
 			r.logger.Infof("%x received MsgTimeoutNow from %x but is not promotable", r.id, m.From)
 		}
 	case pb.MsgReadIndex:
+		// Ellsberg: reads are served only by the leader, so followers do not
+		// forward MsgReadIndex (etcdserver also rejects Range on followers).
 		return ErrProposalDropped
-		if r.lead == None {
-			r.logger.Infof("%x no leader at term %d; dropping index reading msg", r.id, r.Term)
-			return nil
-		}
-		m.To = r.lead
-		r.send(nil, m)
 	case pb.MsgReadIndexResp:
 		if len(m.Entries) != 1 {
 			r.logger.Errorf("%x invalid format of MsgReadIndexResp from %x, entries count: %d", r.id, m.From, len(m.Entries))
@@ -1466,16 +1486,39 @@ func stepFollower(r *raft, m pb.Message) error {
 	return nil
 }
 
+// bootstrapLogLen returns the number of entries etcd writes to the log while
+// bootstrapping an N-member cluster (verified by dumping the WAL of fresh
+// 3- and 5-member clusters):
+//
+//	N  ConfChangeAddNode entries (initial cluster membership, term 1)
+//	1  empty entry appended by the first elected leader
+//	N  member-attribute publish requests, one per member
+//	1  cluster-version set by the leader
+//
+// i.e. 2N+2 (8 for a 3-member cluster). N is the current number of voters,
+// which equals the initial cluster size during bootstrap.
+func (r *raft) bootstrapLogLen() uint64 {
+	n := uint64(len(r.prs.Voters.IDs()))
+	return 2*n + 2
+}
+
 func (r *raft) handleAppendEntries(m pb.Message) {
-	// if m.Index < r.raftLog.committed {
-	// 	r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.committed, Context: m.Context})
-	// 	return
-	// }
-	//change: if m last index is smaller than local commit index, but it contains longer entries, we will still append it:
+	// Ellsberg: upstream etcd discards the entries of a MsgApp whose previous
+	// index is below the local commit index and just replies with the commit
+	// index, so the leader has to resend. Here we instead append the suffix
+	// of the message that lies beyond the commit index, so that the
+	// MsgAppResp (logged together with its MsgApp) reflects the entries the
+	// request actually carried.
 	if m.Index < r.raftLog.committed {
-		last_entry := m.Entries[len(m.Entries)-1]
-		if last_entry.Index == r.raftLog.committed {
-			r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Index: r.raftLog.committed, Context: m.Context})
+		// If the message carries nothing beyond the commit index (no entries,
+		// or a stale MsgApp delivered out of order whose entries are all
+		// committed already), the follower already has everything in it.
+		// As in the spec's "already done with request" case, reply success
+		// with matchIndex = prevLogIndex + len(entries). (Upstream replies
+		// with the commit index instead.) Without this check the indexing
+		// below would go out of range.
+		if len(m.Entries) == 0 || m.Entries[len(m.Entries)-1].Index <= r.raftLog.committed {
+			r.send(m, pb.Message{To: m.From, Type: pb.MsgAppResp, Index: m.Index + uint64(len(m.Entries)), Context: m.Context})
 			return
 		} else {
 			commit_entry := m.Entries[r.raftLog.committed-m.Index-1]
@@ -1783,7 +1826,6 @@ func (r *raft) reduceUncommittedSize(ents []pb.Entry) {
 
 func numOfPendingConf(ents []pb.Entry) int {
 	n := 0
-	// hack: reconfig
 	for i := range ents {
 		if ents[i].Type == pb.EntryConfChange {
 			n++

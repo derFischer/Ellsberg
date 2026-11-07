@@ -204,8 +204,13 @@ type Node interface {
 	// Stop performs any necessary termination of the Node.
 	Stop()
 
+	// Ellsberg additions:
+	// IsLeader reports whether this node is currently the Raft leader; used
+	// by etcdserver to accept client requests only on the leader.
 	IsLeader() bool
 
+	// SetSlConn sets the connection used to report Raft messages to the
+	// simulator (nil disables reporting).
 	SetSlConn(slConn *comm.RPCConnection)
 }
 
@@ -569,11 +574,6 @@ func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState) Ready {
 		CommittedEntries: r.raftLog.nextEnts(),
 		Messages:         r.msgs,
 	}
-
-	// hack: reconfig
-	// if r.isFollower() && r.raftLog.lastIndex() > 8 || r.Term == 3 && r.raftLog.committed < 13 {
-	// 	rd.CommittedEntries = nil
-	// }
 
 	if softSt := r.softState(); !softSt.equal(prevSoftSt) {
 		rd.SoftState = softSt

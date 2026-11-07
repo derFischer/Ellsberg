@@ -103,6 +103,10 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 	var resp *pb.RangeResponse
 	var err error
 
+	// Ellsberg: reads are served only by the leader, matching the spec's
+	// client model. Upstream lets any member serve a Range (forwarding the
+	// ReadIndex to the leader for linearizable reads); here followers reject
+	// it and the client retries against another member.
 	if !s.r.IsLeader() {
 		return nil, ErrNotLeader
 	}
@@ -118,9 +122,10 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 		trace.LogIfLong(traceThreshold)
 	}(time.Now())
 
+	// Ellsberg: report the read request (kind 1 = Range) to the simulator,
+	// and below its reply (ClientRespSucc), so the checker can match each
+	// client reply against the request it answers.
 	id := s.reqIDGen.Next()
-	//reply checker
-	// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.ClientRequest, Msg: messagepb.ClientReq{Req: r, ID: id}})
 
 	if s.slConn != nil {
 		length := 8*3 + 8 + 8 + (uint64)(r.Size())
@@ -136,14 +141,6 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 		s.slConn.WaitFor(reqId, ch)
 	}
 	if !r.Serializable {
-		// hack: stale read
-		// if !s.r.IsLeader() {
-		// 	err = s.linearizableReadNotify(ctx)
-		// 	trace.Step("agreement among raft nodes before linearized reading")
-		// 	if err != nil {
-		// 		return nil, err
-		// 	}
-		// }
 		err = s.linearizableReadNotify(ctx)
 		trace.Step("agreement among raft nodes before linearized reading")
 		if err != nil {
@@ -172,7 +169,6 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 					binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], replySize) // Reply size
 					copy(tosend[offset+40:], data)
 				}
-				// interpreter.PanicIfMarshalError(err)
 				ch := s.slConn.Request(tosend)
 				s.slConn.WaitFor(reqId, ch)
 			}
@@ -188,8 +184,6 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 		err = serr
 		return nil, err
 	}
-	//check reply here
-	// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: true, Type: messagepb.ClientResp, Msg: messagepb.ClientReply{Reply: resp, ID: id}})
 	if s.slConn != nil {
 		var data []byte
 		replySize := uint64(0)
@@ -223,16 +217,11 @@ func (s *EtcdServer) Range(ctx context.Context, r *pb.RangeRequest) (*pb.RangeRe
 }
 
 func (s *EtcdServer) Put(ctx context.Context, r *pb.PutRequest) (*pb.PutResponse, error) {
-	// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.ClientMsg, Msg: r})
-	// d, _ := r.Marshal()
-	// log.Printf("!!!!!!!!!!!!!!!!!!!!!!request before process: %+v\n", d)
 	ctx = context.WithValue(ctx, traceutil.StartTimeKey, time.Now())
 	resp, err := s.raftRequest(ctx, pb.InternalRaftRequest{Put: r})
 	if err != nil {
 		return nil, err
 	}
-	// log.Printf("!!!!!!!!!!!!!!!!!!!!!!request after process: %+v\n", r)
-	// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: true, Type: messagepb.ClientMsg, Msg: resp, Req: r})
 	return resp.(*pb.PutResponse), nil
 }
 
@@ -692,6 +681,10 @@ func (s *EtcdServer) raftRequestOnce(ctx context.Context, r pb.InternalRaftReque
 	if result.err != nil {
 		return nil, result.err
 	}
+	// Ellsberg: upstream's slow-request trace (logs a warning with a timing
+	// breakdown when a request takes longer than traceThreshold) is disabled.
+	// It is diagnostic only; with every message going through the simulator
+	// most requests exceed the threshold and the log fills with warnings.
 	// if startTime, ok := ctx.Value(traceutil.StartTimeKey).(time.Time); ok && result.trace != nil {
 	// applyStart := result.trace.GetStartTime()
 	// The trace object is created in apply. Here reset the start time to trace
@@ -752,7 +745,6 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 		r.Header.Username = authInfo.Username
 		r.Header.AuthRevision = authInfo.Revision
 	}
-	// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: false, Type: messagepb.ClientRequest, Msg: messagepb.ClientReq{Req: r, ID: r.Header.ID}})
 
 	data, err := r.Marshal()
 	if err != nil {
@@ -761,6 +753,15 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 
 	if len(data) > int(s.Cfg.MaxRequestBytes) {
 		return nil, ErrRequestTooLarge
+	}
+
+	// Ellsberg: client writes are accepted only by the leader, so every log
+	// entry after bootstrap corresponds to a client request the leader
+	// received (see the matching check in raft's stepFollower). Upstream
+	// lets followers forward proposals to the leader. The check comes before
+	// s.w.Register so a rejected request leaves no pending wait entry behind.
+	if !s.r.IsLeader() {
+		return nil, ErrNotLeader
 	}
 
 	id := r.ID
@@ -773,10 +774,9 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 	defer cancel()
 
 	start := time.Now()
-	// log.Printf("!!!!!!!!!!!!!!!!!!!put request before propose: %+v\n", r.Put)
-	if !s.r.IsLeader() {
-		return nil, ErrNotLeader
-	}
+	// Ellsberg: report the write request (kind 0 = InternalRaftRequest) to
+	// the simulator before proposing it; its reply is reported below as
+	// ClientRespSucc or ClientRespFail.
 	if s.slConn != nil {
 		length := 8*3 + 8 + 8 + (uint64)(r.Size())
 		reqId, tosend, offset := s.slConn.AllocateRequest(length)
@@ -806,7 +806,6 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 			binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], r.Header.ID)                       // Reply Id
 			binary.LittleEndian.PutUint64(tosend[offset+24:offset+32], 0)                                 // Reply Type
 			binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], 0)                                 // Reply size
-			// interpreter.PanicIfMarshalError(err)
 			ch := s.slConn.Request(tosend)
 			s.slConn.WaitFor(reqId, ch)
 		}
@@ -817,7 +816,6 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 
 	select {
 	case x := <-ch:
-		// messagepb.Sending(s.SLmsg, messagepb.Msg{Send: true, Type: messagepb.ClientResp, Msg: messagepb.ClientReply{Reply: (x.(*applyResult)).resp, ID: r.Header.ID}})
 		if s.slConn != nil {
 			if (x.(*applyResult).err) != nil {
 				replySize := uint64(0)
@@ -831,7 +829,6 @@ func (s *EtcdServer) processInternalRaftRequestOnce(ctx context.Context, r pb.In
 				binary.LittleEndian.PutUint64(tosend[offset+16:offset+24], r.Header.ID)                       // Reply Id
 				binary.LittleEndian.PutUint64(tosend[offset+24:offset+32], 0)                                 // Reply Type
 				binary.LittleEndian.PutUint64(tosend[offset+32:offset+40], 0)                                 // Reply size
-				// interpreter.PanicIfMarshalError(err)
 				ch := s.slConn.Request(tosend)
 				s.slConn.WaitFor(reqId, ch)
 			} else {
