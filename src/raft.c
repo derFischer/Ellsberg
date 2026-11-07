@@ -1580,8 +1580,9 @@ void RaftLibraryInit(RedisRaftCtx *rr, bool cluster_init)
     int reqtimeo = rr->config.request_timeout;
 
     /* Ellsberg: auto-flush is enabled (upstream: disabled) to match the Raft
-     * spec, where the leader updates its own match index as soon as it
-     * appends a client request. Without auto-flush, new entries are fsynced
+     * TLA+ specification (Ongaro, AdvanceCommitIndex), in which the leader
+     * counts itself toward the commit quorum for every entry in its log as
+     * soon as it appends the entry. Without auto-flush, new entries are fsynced
      * on a background thread and the leader counts its own log toward the
      * commit only up to the fsynced index (handleBeforeSleep), so its commit
      * index, and the commit index it sends in AppendEntries, can lag behind
