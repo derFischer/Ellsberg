@@ -148,9 +148,26 @@ static int cmdRaftNode(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
         memcpy(entry->data, &cfg, sizeof(cfg));
         entryAttachRaftReq(rr, entry, req);
 
-        /* Node additions (RAFT.NODE ADD) are not reported to the simulator:
-         * the checker does not model the non-voting phase and treats the
-         * initial membership specially. */
+        /* Ellsberg: reporting of RAFT.NODE ADD is disabled by default.
+         * RedisRaft replies to RAFT.NODE ADD as soon as the non-voting entry
+         * is applied, before the node becomes a voting member (the voting
+         * ADD_NODE entry is only appended once the node has caught up, in
+         * raftNodeHasSufficientLogs()). The reply thus reports a membership
+         * change that has not happened yet, which Ellsberg detects as a
+         * violation (see the paper). Because RedisRaft forms the cluster
+         * through RAFT.NODE ADD (RAFT.CLUSTER JOIN), reporting it would flag
+         * this bug in every run, so it is disabled for the performance
+         * experiments. Build with -DELLSBERG_REPORT_NODE_ADD to report node
+         * additions. */
+#ifdef ELLSBERG_REPORT_NODE_ADD
+        entry->req_id = raft_node_next_reqid(raft_get_my_node(rr->raft));
+        if (raft_get_forwarder(rr->raft)) {
+            // Sending(recv node add)
+            sds add_cmd = InterpreteRaftNode(rr->raft, false, /*add=*/true, /*req_id=*/entry->req_id, argv, NULL, argc);
+            raft_forward(rr->raft, add_cmd, sdslen(add_cmd));
+            sdsfree(add_cmd);
+        }
+#endif
         int e = raft_recv_entry(rr->raft, entry, NULL);
         if (e != 0) {
             entryDetachRaftReq(rr, entry);

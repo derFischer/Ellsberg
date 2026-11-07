@@ -115,12 +115,24 @@ What is reported:
 | RequestVote response (not prevote) | the sender and the receiver |
 
 Reconfiguration: removing a member (`RAFT.NODE REMOVE`) is reported and
-checked. Adding a member is how RedisRaft forms the cluster (`RAFT.CLUSTER
-JOIN` adds each member, first as non-voting, then as voting), so the
-`RAFT.NODE ADD` request and reply are not reported; the log entries it creates
-are reported inside AppendEntries, and the checker accepts the entries of the
-initial membership as a bootstrap prefix. Adding a member after the cluster
-is formed is therefore not checked.
+checked. Adding a member (`RAFT.NODE ADD`) is not reported by default, because
+RedisRaft's reply to it is a bug that Ellsberg detects (see the paper):
+RedisRaft adds a member first as non-voting and only later, once it has caught
+up, as voting, but it replies to `RAFT.NODE ADD` as soon as the non-voting entry
+is applied, before the member is part of the voting configuration. Since
+RedisRaft forms the cluster through `RAFT.NODE ADD` (`RAFT.CLUSTER JOIN`),
+reporting it would flag this bug in every run, so it is disabled for the
+performance experiments. The log entries a node addition creates are still
+reported inside AppendEntries, and the checker accepts the entries of the
+initial membership as a bootstrap prefix.
+
+To report node additions (and detect the bug), build with
+`ELLSBERG_REPORT_NODE_ADD` defined:
+
+```sh
+cmake -DCMAKE_C_FLAGS=-DELLSBERG_REPORT_NODE_ADD ..
+make
+```
 
 Not reported: snapshots, and error replies to clients (for example redirects
 to the leader).

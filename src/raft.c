@@ -983,6 +983,16 @@ static int raftApplyLog(raft_server_t *raft, void *user_data, raft_entry_t *entr
             RedisModule_ReplyWithArray(req->ctx, 2);
             RedisModule_ReplyWithLongLong(req->ctx, cfg->id);
             RedisModule_ReplyWithSimpleString(req->ctx, rr->snapshot_info.dbid);
+#ifdef ELLSBERG_REPORT_NODE_ADD
+            /* Ellsberg: the reply is sent once the non-voting entry is
+             * applied, before the node is a voting member (see cmdRaftNode). */
+            if (raft_get_forwarder(rr->raft)) {
+                // Sending(send node add reply)
+                sds add_reply = InterpreteRaftNodeReply(raft, /*send=*/true, /*add=*/true, entry->req_id, cfg->id, rr->snapshot_info.dbid, true);
+                raft_forward(rr->raft, add_reply, sdslen(add_reply));
+                sdsfree(add_reply);
+            }
+#endif
             RaftReqFree(req);
             break;
         case RAFT_LOGTYPE_REMOVE_NODE:
@@ -1073,8 +1083,13 @@ static int raftNodeHasSufficientLogs(raft_server_t *raft, void *user_data, raft_
 
     raft_entry_req_t *entry = raft_entry_new(sizeof(RaftCfgChange));
     entry->id = rand();
-    /* Node additions are not reported to the simulator (see cmdRaftNode). */
+    /* Node additions are not reported to the simulator unless built with
+     * ELLSBERG_REPORT_NODE_ADD (see cmdRaftNode). */
+#ifdef ELLSBERG_REPORT_NODE_ADD
+    entry->req_id = node->add_req_id;
+#else
     entry->req_id = 0;
+#endif
     entry->type = RAFT_LOGTYPE_ADD_NODE;
 
     RaftCfgChange *cfgchange = (RaftCfgChange *) entry->data;
@@ -1118,6 +1133,9 @@ void raftNotifyMembershipEvent(raft_server_t *raft, void *user_data,
             /* Allocate a new node */
             node = NodeCreate(rr, cfgchange->id, &cfgchange->addr);
             RedisModule_Assert(node != NULL);
+#ifdef ELLSBERG_REPORT_NODE_ADD
+            node->add_req_id = entry->req_id;
+#endif
 
             addUsedNodeId(rr, cfgchange->id);
 

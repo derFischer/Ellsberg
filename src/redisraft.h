@@ -468,6 +468,9 @@ typedef struct Node {
     long pending_proxy_response_num; /* Number of pending proxy responses */
     STAILQ_HEAD(pending_responses, PendingResponse) pending_responses;
     LIST_ENTRY(Node) entries;
+#ifdef ELLSBERG_REPORT_NODE_ADD
+    raft_req_id_t add_req_id;        /* Request ID of the RAFT.NODE ADD that added this node */
+#endif
 } Node;
 
 /* General purpose status code.  Convention is this:
