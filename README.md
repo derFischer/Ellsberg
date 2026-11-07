@@ -114,8 +114,16 @@ What is reported:
 | RequestVote (not prevote) | the sender |
 | RequestVote response (not prevote) | the sender and the receiver |
 
-Not reported: `RAFT.NODE ADD` and the non-voting phase of a new member,
-snapshots, and error replies to clients (for example redirects to the leader).
+Reconfiguration: removing a member (`RAFT.NODE REMOVE`) is reported and
+checked. Adding a member is how RedisRaft forms the cluster (`RAFT.CLUSTER
+JOIN` adds each member, first as non-voting, then as voting), so the
+`RAFT.NODE ADD` request and reply are not reported; the log entries it creates
+are reported inside AppendEntries, and the checker accepts the entries of the
+initial membership as a bootstrap prefix. Adding a member after the cluster
+is formed is therefore not checked.
+
+Not reported: snapshots, and error replies to clients (for example redirects
+to the leader).
 
 ## Deviations from RedisRaft
 
