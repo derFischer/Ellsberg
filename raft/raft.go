@@ -511,7 +511,7 @@ func (r *raft) maybeSendAppend(to uint64, sendIfEmpty bool) bool {
 	m.To = to
 
 	term, errt := r.raftLog.term(pr.Next - 1)
-	// Ellsberg: as in the Raft spec, an AppendEntries carries every entry
+	// Ellsberg: as in the Raft TLA+ spec, an AppendEntries carries every entry
 	// from Next to the end of the leader's log, instead of being cut at
 	// maxMsgSize (upstream: r.raftLog.entries(pr.Next, r.maxMsgSize)).
 	ents, erre := r.raftLog.entries(pr.Next, math.MaxUint64)
@@ -576,7 +576,7 @@ func (r *raft) sendHeartbeat(to uint64, ctx []byte) {
 	// The leader MUST NOT forward the follower's commit to
 	// an unmatched index.
 	//
-	// Ellsberg: the Raft spec has no separate heartbeat message; a heartbeat
+	// Ellsberg: the Raft TLA+ spec has no separate heartbeat message; a heartbeat
 	// is an AppendEntries with no entries. So instead of MsgHeartbeat we send
 	// an empty MsgApp whose previous index/term are the leader's last log
 	// index/term. Because the follower now runs the normal log-matching check
@@ -1513,7 +1513,7 @@ func (r *raft) handleAppendEntries(m pb.Message) {
 		// If the message carries nothing beyond the commit index (no entries,
 		// or a stale MsgApp delivered out of order whose entries are all
 		// committed already), the follower already has everything in it.
-		// As in the spec's "already done with request" case, reply success
+		// As in the Raft TLA+ spec's "already done with request" case, reply success
 		// with matchIndex = prevLogIndex + len(entries). (Upstream replies
 		// with the commit index instead.) Without this check the indexing
 		// below would go out of range.

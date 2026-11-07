@@ -91,7 +91,21 @@ second and prints the message counts to stdout.
 
 The changes below are marked with `Ellsberg:` comments in the code.
 
-**Spec alignment (Raft)**
+**Spec alignment (Raft TLA+ specification)**
+
+These changes make etcd follow the Raft TLA+ specification (Ongaro's
+`raft.tla`, in the version used by Ellsberg's checker, which sends every entry
+from `nextIndex` to the end of the leader's log in one AppendEntries):
+
+- There is no separate heartbeat message: the leader only sends AppendEntries,
+  carrying its entries from `nextIndex` and its full `commitIndex`
+  (`AppendEntries`).
+- A follower handles every AppendEntries the same way and replies to each one.
+  A request it already has gets a successful reply with match index =
+  previous index + number of entries; a request from a lower term gets an
+  unsuccessful reply (`HandleAppendEntriesRequest`).
+- Only the leader accepts client requests (`ClientRequest`; see
+  *Leader-only clients* below).
 
 | Where | Change |
 |---|---|
@@ -102,13 +116,6 @@ The changes below are marked with `Ellsberg:` comments in the code.
 | `raft/raft.go` `Step` | The `MsgAppResp` sent in reply to a lower-term `MsgApp` is marked `Reject`. |
 | `etcdserver/raft.go` `processMessages` | Every `MsgApp` gets its own `MsgAppResp`; upstream keeps only the last one per batch. Only responses carrying a ReadIndex context are still deduplicated. |
 | `etcdserver/api/rafthttp/msgappv2_codec.go` | `MsgApp` with a `Context` always uses the full encoding, so the context is not dropped. |
-
-No change was needed for the leader's own match index. As in the Raft TLA+
-specification (Ongaro, `AdvanceCommitIndex`), where the leader counts itself
-toward the commit quorum for every entry in its log as soon as it appends the
-entry, etcd's leader updates its own progress immediately when it appends an
-entry (`raft/raft.go` `appendEntry`: `r.prs.Progress[r.id].MaybeUpdate(li)`),
-before the entry is persisted.
 
 **Leader-only clients**
 
