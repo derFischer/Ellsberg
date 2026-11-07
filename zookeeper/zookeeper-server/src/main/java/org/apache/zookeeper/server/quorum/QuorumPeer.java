@@ -1335,10 +1335,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
     public Follower follower;
     public Leader leader;
     public Observer observer;
-    public SimConn simConn;
-    public SimConn simConnSendResp;
-    public SimConn simConnRecvReq;
-    public SimConn simConnAck;
+    public SimConn simConn = new SimConn();
 
     protected Follower makeFollower(FileTxnSnapLog logFactory) throws IOException {
         Follower f = new Follower(this, new FollowerZooKeeperServer(logFactory, this, this.zkDb));

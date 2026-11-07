@@ -20,14 +20,12 @@ public class SimConn {
     public static boolean enabled = false;
     final static public DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneId.systemDefault());
     static final public long initTimeMilli = System.currentTimeMillis();
-    static final public long initTimeNano = System.nanoTime();
 
     public static class SimConnMessage implements Record {
         final public static int TIMEOUT_TYPE = 0;
         final public static int BYTES_TYPE = 1;
         final public static int QP_TYPE = 2;
         final public static int HDR_TYPE = 3;
-        final public static int QP_ARRAY_TYPE = 4;
         int simConnMessageType;
         long timestamp;
 
@@ -36,10 +34,6 @@ public class SimConn {
         }
 
         public SimConnMessage(int simConnMessageType) {
-            this.simConnMessageType = simConnMessageType;
-        }
-        public SimConnMessage(long ts, int simConnMessageType) {
-            this.timestamp = ts;
             this.simConnMessageType = simConnMessageType;
         }
 
@@ -58,7 +52,6 @@ public class SimConn {
     public static final int TCP = 0x1000_0006;
 
     public static class RecordSimConnMessage extends SimConnMessage {
-        protected static final Logger LOG = LoggerFactory.getLogger(SimConnMessage.class);
         boolean isSend;
         long peerId;
         // not | qp
@@ -190,8 +183,6 @@ public class SimConn {
     // End of RecordArraySimConnMessage
 
     public static class BytesSimConnMessage extends SimConnMessage {
-        protected static final Logger LOG = LoggerFactory.getLogger(SimConnMessage.class);
-        long timestamp;
         boolean isSend;
         long peerId;
         // not | qp
@@ -271,7 +262,7 @@ public class SimConn {
         final static public int RUNNING = 1;
         final static public int STOPPING = 2;
         final static public int SHUTDOWN = 3;
-        public int state = NOT_READY;
+        public volatile int state = NOT_READY;
 
         AsyncSender() {
             this.sendQueue = new LinkedBlockingQueue<>();
@@ -291,7 +282,6 @@ public class SimConn {
         }
 
         public void run() {
-            state = RUNNING;
             ByteArrayOutputStream tmpOutputStream = new ByteArrayOutputStream(2048);
             while (true) {
                 try {
@@ -336,9 +326,6 @@ public class SimConn {
 
         long startMsgCount = 0;
 
-        public long queueBeginTs;
-        public long fileBeginTs;
-
         public static class SendQueue {
             public ArrayList<SimConnMessage> queue;
             public long beginTs;
@@ -349,7 +336,9 @@ public class SimConn {
                 this.beginTs = beginTs;
                 this.afw = afw;
                 queue = new ArrayList<>(size);
-                ResetLogPath(beginTs);
+                if (beginTs != 0) {
+                    ResetLogPath(beginTs);
+                }
             }
 
             public void ResetLogPath(long tsMilli) {
@@ -372,48 +361,52 @@ public class SimConn {
                 LOG.error("Failed to create dirs: {}", logDir);
                 System.exit(-1);
             }
-            // Every put message will have timestamp larger than current,
-            // and so larger than fileBeginTs
-            queueBeginTs = fileBeginTs = getCurrentBeginTs();
+            // The first message sets the time slot (see put()).
             sendQueue = new SendQueue(0, queueSize, this);
             immutableSendQueues = new ArrayBlockingQueue<>(4);
             state = NOT_READY;
         }
 
-        public long getCurrentBeginTs() {
-            long current = System.currentTimeMillis();
-            return intervalMilli * ((current - initTimeMilli) / intervalMilli) + initTimeMilli;
-        }
-
         public long getPeriodTs(long tsMilli) {
             return intervalMilli * (tsMilli / intervalMilli);
-            // return intervalMilli * ((tsMilli - initTimeMilli) / intervalMilli) + initTimeMilli;
         }
 
         @Override
         public synchronized void put(SimConnMessage m) {
+            if (sendQueue == null) {
+                // Already flushed (shut down); drop late messages.
+                return;
+            }
+            if (m.simConnMessageType == SimConnMessage.TIMEOUT_TYPE) {
+                // Stop: hand over the current time slot, if it has messages.
+                if (sendQueue.dataPath != null) {
+                    rotate(0);
+                }
+                return;
+            }
             long mTsMilli = m.timestamp/1_000_000L;
             if (sendQueue.beginTs == 0) {
                 sendQueue.beginTs = getPeriodTs(mTsMilli);
                 sendQueue.ResetLogPath(sendQueue.beginTs);
             }
-            // if ((queueBeginTs + intervalMilli - initTimeMilli)*1_000_000L < (m.timestamp - initTimeNano)
             long mTimeslotBegin = getPeriodTs(mTsMilli);
-            if (mTimeslotBegin > sendQueue.beginTs
-                    || m.simConnMessageType == SimConnMessage.TIMEOUT_TYPE) {
-                // Set the `prevSendQueue`
-                int lastSize = sendQueue.queue.size();
-                try {
-                    immutableSendQueues.put(sendQueue);
-                } catch (InterruptedException e) {
-                    LOG.error("Shouldn't be interrupted");
-                    System.exit(-1);
-                }
-                sendQueue = new SendQueue(mTimeslotBegin, lastSize, this);
+            if (mTimeslotBegin > sendQueue.beginTs) {
+                rotate(mTimeslotBegin);
             }
-            if (m.simConnMessageType != SimConnMessage.TIMEOUT_TYPE) {
-                sendQueue.queue.add(m);
+            sendQueue.queue.add(m);
+        }
+
+        /* Hands the current time slot to the writer thread and starts a new
+         * one beginning at newBeginTs (0: set by the next message). */
+        private void rotate(long newBeginTs) {
+            int lastSize = sendQueue.queue.size();
+            try {
+                immutableSendQueues.put(sendQueue);
+            } catch (InterruptedException e) {
+                LOG.error("Shouldn't be interrupted");
+                System.exit(-1);
             }
+            sendQueue = new SendQueue(newBeginTs, lastSize, this);
         }
 
         public void writeSendQueue(SendQueue sendQueue) throws IOException {
@@ -441,26 +434,14 @@ public class SimConn {
             startMsgCount = msgCount;
             metaWriter.close();
 
-            LOG.info("\033[1;32mThread {} done writing {}, takes {} ms, path={}\033[0m", tag, size, (System.currentTimeMillis()-begin), sendQueue.dataPath);
+            LOG.debug("SimConn({}) wrote {} messages in {} ms to {}", tag, size, (System.currentTimeMillis() - begin), sendQueue.dataPath);
         }
 
         @Override
         public void run() {
-            state = RUNNING;
             try {
                 while (state == RUNNING) {
-                    SendQueue sendQueue = null;
-                    // while (sendQueue == null && state == RUNNING) {
-                    //     sendQueue = immutableSendQueues.poll(2, TimeUnit.SECONDS);
-                    //     // This guarantees that if RUNNING, this thread can notify the master
-                    //     // thread about the timeslot timeout if the master thread doesn't
-                    //     // receive anything since timeslot timeout.
-                    //     if (System.currentTimeMillis() - fileBeginTs > intervalMilli) {
-                    //         put(new SimConnMessage(System.nanoTime(), SimConnMessage.TIMEOUT_TYPE));
-                    //         fileBeginTs += intervalMilli;
-                    //     }
-                    // }
-                    sendQueue = immutableSendQueues.poll(2, TimeUnit.SECONDS);
+                    SendQueue sendQueue = immutableSendQueues.poll(2, TimeUnit.SECONDS);
                     if (sendQueue != null) {
                         writeSendQueue(sendQueue);
                     }
@@ -468,7 +449,7 @@ public class SimConn {
                 flush();
                 state = SHUTDOWN;
             } catch (ConcurrentModificationException e) {
-                LOG.error("\033[1;31m{} encountered ConcurrentModificationException\033[0m", tag);
+                LOG.error("SimConn({}) encountered ConcurrentModificationException", tag);
                 System.exit(-1);
             } catch (InterruptedException e) {
                 LOG.info("SimConn ({}) exited due to InterruptedException", tag);
@@ -479,29 +460,27 @@ public class SimConn {
             }
         }
 
+        /* Writes all pending time slots, including the current one. Called by
+         * the writer thread when it stops. */
         @Override
         protected void flush() throws IOException {
-            try {
-                immutableSendQueues.put(sendQueue);
+            SendQueue last;
+            synchronized (this) {
+                last = sendQueue;
                 sendQueue = null;
-            } catch (InterruptedException e) {
-                LOG.error("Flushing sendQueue to immutableSendQueues interrupted.");
-                System.exit(-1);
             }
-            while (!immutableSendQueues.isEmpty()) {
-                try {
-                    SendQueue sendQueue = immutableSendQueues.take();
-                    writeSendQueue(sendQueue);
-                } catch (InterruptedException e) {
-                    LOG.error("Flushing immutableSendQueues interrupted.");
-                    System.exit(-1);
-                }
+            SendQueue pending;
+            while ((pending = immutableSendQueues.poll()) != null) {
+                writeSendQueue(pending);
+            }
+            if (last != null && last.dataPath != null) {
+                writeSendQueue(last);
             }
         }
     }
     // End of AsyncFileWriter
 
-    public MODE mode;
+    public MODE mode = MODE.NONE;
     public CONNTYPE conntype;
 
     // Just in case we may need it.
@@ -509,7 +488,8 @@ public class SimConn {
     public long myid;
     public String tag;
 
-    // NOTE: Don't directly use inConn/outConn, but use inArchive/outArchive
+    // inConn is opened so that the simulator can open the write end of its
+    // pipe; nothing is read from it.
     private InputStream inConn;
     private OutputStream outConn;
 
@@ -519,9 +499,7 @@ public class SimConn {
 
     public void setupEnv() {
         final String simmodeStr = System.getenv("SIMMODE");
-        if (simmodeStr == null) {
-            this.mode = MODE.ASYNC;
-        } else if (simmodeStr.equals("NONE")) {
+        if (simmodeStr == null || simmodeStr.equals("NONE")) {
             this.mode = MODE.NONE;
         } else if (simmodeStr.equals("ASYNC")) {
             this.mode = MODE.ASYNC;
@@ -545,10 +523,26 @@ public class SimConn {
             this.conntype = CONNTYPE.PIPE;
         } else {
             LOG.error("Unexpected simconntype: " + simconntypeStr);
+            System.exit(1);
+        }
+
+        if (this.mode == MODE.SYNC) {
+            LOG.error("SIMMODE=SYNC is not implemented for ZooKeeper; use ASYNC or FILE");
+            System.exit(1);
+        }
+        if (this.mode != MODE.NONE && this.conntype != CONNTYPE.PIPE && this.mode != MODE.FILE) {
+            LOG.error("Only SIMCONNTYPE=PIPE is implemented for ZooKeeper");
+            System.exit(1);
         }
 
         if (this.mode != MODE.NONE) {
-            this.iid = Long.parseLong(System.getenv("IID"));
+            final String iidStr = System.getenv("IID");
+            try {
+                this.iid = Long.parseLong(iidStr);
+            } catch (NumberFormatException e) {
+                LOG.error("IID must be set to a number when SIMMODE is " + simmodeStr + " (got: " + iidStr + ")");
+                System.exit(1);
+            }
         }
         enabled = this.mode != MODE.NONE;
     }
@@ -574,23 +568,22 @@ public class SimConn {
                     LOG.error(e.toString());
                     System.exit(1);
                 }
-                LOG.info("\033[1;31mSimConn Initialized. Connected to {} and {}\033[0m", stocPath, ctosPath);
-            } else {
-                LOG.error("Only PIPE conntype is implemented");
+                LOG.info("SimConn initialized. Connected to {} and {}", stocPath, ctosPath);
             }
         }
 
-        // TODO: implement for SYNC
         switch (this.mode) {
             case ASYNC:
                 asyncSender = new AsyncSender(outConn);
-                asyncSender.start();
                 break;
             case FILE:
                 asyncSender = new AsyncFileWriter(iid, tag);
-                asyncSender.start();
                 break;
+            default:
+                return;
         }
+        asyncSender.state = AsyncSender.RUNNING;
+        asyncSender.start();
     }
 
     public void request(SimConnMessage m) {
@@ -601,35 +594,26 @@ public class SimConn {
         }
     }
 
-    public void flush() {
-        try {
-            asyncSender.flush();
-        } catch (IOException e) {
-            LOG.error(e.toString());
-            System.exit(-1);
-        }
-    }
-
+    /* Stops reporting. In FILE mode, the current time slot is handed to the
+     * writer thread, which writes it and exits. In ASYNC mode the sender
+     * thread keeps draining its queue onto the pipe. */
     public void stop() {
-        if (enabled()) {
+        if (enabled() && mode == MODE.FILE && asyncSender.state == AsyncSender.RUNNING) {
             asyncSender.put(new SimConnMessage(SimConnMessage.TIMEOUT_TYPE));
             asyncSender.state = AsyncSender.STOPPING;
         }
     }
 
+    /* Stops reporting and, in FILE mode, waits until all log files are written. */
     public void shutdown() {
-        if (enabled()) {
-            if (asyncSender.state != AsyncSender.STOPPING) {
-                LOG.error("Should stop before shutdown.");
-                System.exit(-1);
-            }
+        stop();
+        if (enabled() && mode == MODE.FILE) {
             try {
                 while (asyncSender.state != AsyncSender.SHUTDOWN) {
-                    Thread.sleep(1000);
+                    Thread.sleep(100);
                 }
             } catch (InterruptedException e) {
-                LOG.error("Waiting for writing done is interrupted.");
-                System.exit(-1);
+                Thread.currentThread().interrupt();
             }
         }
     }

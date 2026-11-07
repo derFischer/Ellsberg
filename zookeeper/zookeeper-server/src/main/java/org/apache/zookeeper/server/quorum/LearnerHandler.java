@@ -140,8 +140,7 @@ public class LearnerHandler extends ZooKeeperThread {
      * that proposal arrives, it switches to the last proposal received
      * or clears the value if there is no pending proposal.
      */
-    private class
-    SyncLimitCheck {
+    private class SyncLimitCheck {
 
         private boolean started = false;
         private long currentZxid = 0;
@@ -493,7 +492,9 @@ public class LearnerHandler extends ZooKeeperThread {
                 this.sid = learnerMaster.getAndDecrementFollowerCounter();
             }
 
-            this.simConn.init(simConn.myid, String.format("handler.%d", getSid()));
+            if (ownsSimConn) {
+                simConn.init(parentSimConnMyid, String.format("handler.%d", getSid()));
+            }
             // sending() leader confirmed tcp connection
             if (simConn.enabled()) {
                 simConn.request(SimConn.BytesSimConnMessage.createForTCP(getSid()));
@@ -540,7 +541,7 @@ public class LearnerHandler extends ZooKeeperThread {
                 oa.writeRecord(newEpochPacket, "packet");
                 messageTracker.trackSent(Leader.LEADERINFO);
                 bufferedOutput.flush();
-                // sending() leader send LAEDERINFO (NEWEPOCH)
+                // sending() leader send LEADERINFO (NEWEPOCH)
                 if (simConn.enabled()) {
                     simConn.request(new SimConn.RecordSimConnMessage(getSid(), true, newEpochPacket));
                 }
@@ -615,7 +616,6 @@ public class LearnerHandler extends ZooKeeperThread {
                 QuorumPacket newLeaderQP = new QuorumPacket(Leader.NEWLEADER, newLeaderZxid, learnerMaster.getQuorumVerifierBytes(), null);
                 // sending() leader send NEWLEADER (All sync stage qps are sent together with newleader here)
                 if (simConn.enabled()) {
-                    // simConn.request(new SimConn.RecordSimConnMessage(getSid(), true, newLeaderQP));
                     syncArrayList.add(newLeaderQP);
                     simConn.request(new SimConn.RecordArraySimConnMessage(getSid(), true, syncArrayList));
                 }
@@ -672,7 +672,7 @@ public class LearnerHandler extends ZooKeeperThread {
             //
             LOG.debug("Sending UPTODATE message to {}", sid);
             QuorumPacket uptodate = new QuorumPacket(Leader.UPTODATE, -1, null, null);
-            // sending() leader send UPTODATE (TOCHECK: maybe same as COMMIT-LD)
+            // sending() leader send UPTODATE
             if (simConn.enabled()) {
                 simConn.request(new SimConn.RecordSimConnMessage(getSid(), true, uptodate));
             }
@@ -903,17 +903,6 @@ public class LearnerHandler extends ZooKeeperThread {
                 Iterator<Proposal> itr = db.getCommittedLog().iterator();
                 currentZxid = queueCommittedProposals(itr, peerLastZxid, null, maxCommittedLog);
                 needSnap = false;
-                //
-                // queueOpPacket(Leader.DIFF, maxCommittedLog);
-                // for (Proposal propose : db.getCommittedLog()) {
-                //     if (propose.packet.getZxid() > peerLastZxid) {
-                //         queuePacket(propose.packet);
-                //         QuorumPacket qcommit = new QuorumPacket(Leader.COMMIT, propose.packet.getZxid(),
-                //                 null, null);
-                //         queuePacket(qcommit);
-                //     }
-                // }
-                // needSnap = false;
             } else if (peerLastZxid < minCommittedLog && txnLogSyncEnabled) {
                 // Use txnlog and committedLog to sync
 
@@ -1066,7 +1055,6 @@ public class LearnerHandler extends ZooKeeperThread {
             queuePacket(propose.packet);
             // sending() leader send proposal (SYNC stage)
             if (simConn.enabled()) {
-                // simConn.request(new SimConn.RecordSimConnMessage(getSid(), true, propose.packet));
                 syncArrayList.add(propose.packet);
             }
             queueOpPacket(Leader.COMMIT, packetZxid);
@@ -1098,7 +1086,9 @@ public class LearnerHandler extends ZooKeeperThread {
             LOG.warn("Ignoring unexpected exception", e);
         }
 
-        this.simConn.shutdown();
+        if (ownsSimConn) {
+            simConn.shutdown();
+        }
 
         closeSocket();
 
@@ -1141,7 +1131,6 @@ public class LearnerHandler extends ZooKeeperThread {
         queuePacket(packet);
         // sending() leader send DIFF/TRUNC/SNAP/COMMIT (SYNC stage)
         if (simConn.enabled()) {
-            // simConn.request(new SimConn.RecordSimConnMessage(getSid(), true, packet));
             syncArrayList.add(packet);
         }
     }
@@ -1236,9 +1225,19 @@ public class LearnerHandler extends ZooKeeperThread {
         }
     }
 
-    public SimConn simConn;
+    /* Ellsberg: in FILE mode each LearnerHandler writes its own log files
+     * (handler.<sid>), created in run() once the follower id is known. In
+     * other modes it shares the peer's SimConn. */
+    public SimConn simConn = new SimConn();
+    private boolean ownsSimConn = false;
+    private long parentSimConnMyid;
     public void setSimConn(SimConn simConn) {
-        this.simConn = simConn.mode != SimConn.MODE.FILE ? simConn : new SimConn();
-        // Will init in `run()` after knowing follower id.
+        if (simConn.mode == SimConn.MODE.FILE) {
+            this.simConn = new SimConn();
+            this.ownsSimConn = true;
+            this.parentSimConnMyid = simConn.myid;
+        } else {
+            this.simConn = simConn;
+        }
     }
 }

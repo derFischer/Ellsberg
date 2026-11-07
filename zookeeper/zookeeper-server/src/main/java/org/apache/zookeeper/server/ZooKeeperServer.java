@@ -965,7 +965,6 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
         if (jvmPauseMonitor != null) {
             jvmPauseMonitor.serviceStop();
         }
-        simConnAck.stop();
         simConnAck.shutdown();
 
         if (zkDb != null) {
@@ -2417,9 +2416,11 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
         ServerMetrics.getMetrics().QUOTA_EXCEEDED_ERROR_PER_NAMESPACE.add(namespace, 1);
     }
 
-    public SimConn simConn;
-    public SimConn simConnSendResp;
-    public SimConn simConnRecvReq;
-    public SimConn simConnAck;
+    /* Ellsberg: message reporting. Set by QuorumPeer; a new SimConn is
+     * disabled until init() is called. */
+    public SimConn simConn = new SimConn();
+    public SimConn simConnSendResp = new SimConn();
+    public SimConn simConnRecvReq = new SimConn();
+    public SimConn simConnAck = new SimConn();
 }
 

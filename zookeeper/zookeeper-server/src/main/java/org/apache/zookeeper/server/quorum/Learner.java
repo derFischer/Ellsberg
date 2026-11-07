@@ -132,7 +132,7 @@ public class Learner {
         return pendingRevalidations.size();
     }
 
-    public SimConn simConn = null;
+    public SimConn simConn = new SimConn();
 
     public void setSimConn(SimConn simConn) {
         this.simConn = simConn;
@@ -763,8 +763,7 @@ public class Learner {
                     self.adminServer.setZooKeeperServer(zk);
                     break outerLoop;
                 case Leader.NEWLEADER: // Getting NEWLEADER here instead of in discovery
-                    // sending() learner recv LEADERINFO (will reply later)
-                    // (all received for sync will be forwarded here)
+                    // sending() learner recv NEWLEADER (will reply later)
                     if (simConn.enabled()) {
                         simConn.request(new SimConn.RecordSimConnMessage(self.getLeaderId(), false, qp));
                     }

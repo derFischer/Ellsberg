@@ -159,8 +159,6 @@ public class LeaderZooKeeperServer extends QuorumZooKeeperServer {
         if (containerManager != null) {
             containerManager.stop();
         }
-        simConnSendResp.stop();
-        simConnRecvReq.stop();
         simConnSendResp.shutdown();
         simConnRecvReq.shutdown();
         super.shutdown();

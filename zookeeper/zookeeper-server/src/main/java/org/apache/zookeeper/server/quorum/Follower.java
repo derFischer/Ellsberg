@@ -119,11 +119,12 @@ public class Follower extends Learner {
                 } else {
                     om = null;
                 }
-                // create a reusable packet to reduce gc impact
+                // Ellsberg: a new packet per read (upstream reuses one packet),
+                // since reported packets are serialized later by the reporting
+                // thread.
                 while (this.isRunning()) {
                     QuorumPacket qp = new QuorumPacket();
                     readPacket(qp);
-                    // sending() follower recv a package.
                     processPacket(qp);
                 }
             } catch (Exception e) {

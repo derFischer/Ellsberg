@@ -140,7 +140,8 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements Req
             while (true) {
                 ServerMetrics.getMetrics().PREP_PROCESSOR_QUEUE_SIZE.add(submittedRequests.size());
                 Request request = submittedRequests.take();
-                // sending() any recv a Request from client
+                // Ellsberg: report client writes (and session changes) received by
+                // the leader. Reads are not reported (see FinalRequestProcessor).
                 if (zks.simConn.enabled()) {
                     switch (request.type) {
                         case OpCode.createSession:
@@ -150,12 +151,8 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements Req
                             TxnHeader fakeHeader = new TxnHeader(request.sessionId, request.cxid, 0, 0, 0);
                             this.zks.simConnRecvReq.request(SimConn.RecordSimConnMessage.createForClientReq(request.sessionId, fakeHeader, false));
                             break;
-                        case OpCode.getData:
-                            // fakeHeader = new TxnHeader(request.sessionId, request.cxid, 0, 0, 0);
-                            // this.zks.simConnRecvReq.request(SimConn.RecordSimConnMessage.createForClientReq(request.sessionId, fakeHeader, true));
-                            break;
                         default:
-                            LOG.info("\033[1;31m{}\033[0m", request.type);
+                            break;
                     }
                 }
                 ServerMetrics.getMetrics().PREP_PROCESSOR_QUEUE_TIME

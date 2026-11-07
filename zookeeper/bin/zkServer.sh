@@ -207,16 +207,6 @@ start-foreground)
     -XX:+HeapDumpOnOutOfMemoryError -XX:OnOutOfMemoryError='kill -9 %p' \
     -cp "$CLASSPATH" $JVMFLAGS -Xms8g -Xmx16g $ZOOMAIN "$ZOOCFG"
     ;;
-perf-start-foreground)
-    ZOO_CMD=(exec "$JAVA")
-    if [ "${ZOO_NOEXEC}" != "" ]; then
-      ZOO_CMD=("$JAVA")
-    fi
-    sudo perf record -g -- "${ZOO_CMD[@]}" $ZOO_DATADIR_AUTOCREATE "-Dzookeeper.log.dir=${ZOO_LOG_DIR}" \
-    "-Dzookeeper.log.file=${ZOO_LOG_FILE}" \
-    -XX:+PreserveFramePointer -XX:+UnlockDiagnosticVMOptions -XX:+DumpPerfMapAtExit -XX:+HeapDumpOnOutOfMemoryError -XX:OnOutOfMemoryError='kill -9 %p' \
-    -cp "$CLASSPATH" $JVMFLAGS $ZOOMAIN "$ZOOCFG"
-    ;;
 print-cmd)
     echo "\"$JAVA\" $ZOO_DATADIR_AUTOCREATE -Dzookeeper.log.dir=\"${ZOO_LOG_DIR}\" \
     -Dzookeeper.log.file=\"${ZOO_LOG_FILE}\" \

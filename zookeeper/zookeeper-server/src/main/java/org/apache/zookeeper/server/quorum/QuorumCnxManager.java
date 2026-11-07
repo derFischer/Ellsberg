@@ -1496,5 +1496,5 @@ public class QuorumCnxManager {
         return self.isReconfigEnabled();
     }
 
-    public SimConn simConn;
+    public SimConn simConn = new SimConn();
 }

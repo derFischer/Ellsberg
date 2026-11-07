@@ -584,8 +584,8 @@ public class FinalRequestProcessor implements RequestProcessor {
         try {
             if (path == null || rsp == null) {
                 responseSize = cnxn.sendResponse(hdr, rsp, "response");
-                // Create, Set will get here
-                // sending() any reply to client (write)
+                // Ellsberg: report the reply to a write. Reads are not reported:
+                // ZooKeeper serves them locally and the checker does not check them.
                 if (zks.simConn.enabled()) {
                     switch (request.type) {
                         case OpCode.createSession:
@@ -595,9 +595,6 @@ public class FinalRequestProcessor implements RequestProcessor {
                             TxnHeader fakeHeader = new TxnHeader(request.sessionId, request.cxid, 0, 0, 0);
                             this.zks.simConnSendResp.request(SimConn.RecordSimConnMessage.createForClientResp(request.sessionId, fakeHeader, false));
                             break;
-                    }
-                    if (request.type == OpCode.getData) {
-                        LOG.info("\033[1;31munexpected read here (wzh)\033[0m");
                     }
                 }
             } else {
@@ -611,21 +608,15 @@ public class FinalRequestProcessor implements RequestProcessor {
                         GetDataResponse getDataResponse = (GetDataResponse) rsp;
                         stat = getDataResponse.getStat();
                         responseSize = cnxn.sendResponse(hdr, rsp, "response", path, stat, opCode);
-                        // Get will get here
-                        // sending() any reply to client (read)
-                        // TxnHeader fakeHeader = new TxnHeader(request.sessionId, request.cxid, 0, 0, 0);
-                        // this.zks.simConnSendResp.request(SimConn.RecordSimConnMessage.createForClientResp(request.sessionId, fakeHeader, true));
                         break;
                     }
                     case OpCode.getChildren2 : {
                         GetChildren2Response getChildren2Response = (GetChildren2Response) rsp;
                         stat = getChildren2Response.getStat();
                         responseSize = cnxn.sendResponse(hdr, rsp, "response", path, stat, opCode);
-                        LOG.info("\033[1;31m 3333333333333\033[0m");
                         break;
                     }
                     default:
-                        LOG.info("\033[1;31m 444444444444\033[0m");
                         responseSize = cnxn.sendResponse(hdr, rsp, "response");
                 }
             }

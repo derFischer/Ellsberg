@@ -45,8 +45,9 @@ public class SendAckRequestProcessor implements RequestProcessor, Flushable {
                 si.logLatency(ServerMetrics.getMetrics().PROPOSAL_ACK_CREATION_LATENCY);
 
                 learner.writePacket(qp, false);
-                // sending() follower reply PROPOSAL with ACK
-                // TODO: this is a big hack...
+                // sending() follower reply PROPOSAL with ACK, through the ack
+                // channel (its own log file in FILE mode); the leader id is
+                // looked up with findLeader() for every ACK.
                 if (learner.simConn.enabled()) {
                     learner.zk.simConnAck.request(new SimConn.RecordSimConnMessage(learner.findLeader().getId(), true, qp));
                 }
