@@ -1671,22 +1671,6 @@ int raft_apply_all(raft_server_t *me)
         return 0;
     }
 
-    if (raft_is_leader(me)) {
-        raft_msg_id_t last = me->read_queue_tail ? me->read_queue_tail->msg_id : 0;
-
-        for (int i = 0; i < me->num_nodes; i++)
-        {
-            if (me->node == me->nodes[i])
-                continue;
-
-            if (raft_node_get_next_msgid(me->nodes[i]) > last &&
-                raft_node_get_next_idx(me->nodes[i]) > raft_get_current_idx(me))
-                continue;
-
-            raft_send_appendentries(me, me->nodes[i]);
-        }
-    }
-
     while (me->commit_idx > me->last_applied_idx) {
         if (raft_time_millis(me) > me->exec_deadline) {
             me->pending_operations = 1;
