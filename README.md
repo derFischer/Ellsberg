@@ -47,8 +47,12 @@ redis-cli -p 5002 RAFT.CLUSTER JOIN localhost:5001
 redis-cli -p 5003 RAFT.CLUSTER JOIN localhost:5001
 ```
 
-Clients send requests to the leader (member 1 after `INIT`). The checker
-supports `SET` and `GET`.
+Currently only client requests sent to the leader are supported (member 1
+after `INIT`), and the checker supports `SET` and `GET`. A follower also
+reports a request it receives, but then redirects the client to the leader
+(or, with `follower-proxy` enabled, forwards the request to the leader, which
+reports it again under a new request ID); the redirect is not reported, so the
+checker would see a request without a reply.
 
 ## Configuration
 
