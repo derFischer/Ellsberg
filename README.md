@@ -123,7 +123,7 @@ snapshots, and error replies to clients (for example redirects to the leader).
 
 | Where | Change |
 |---|---|
-| `src/raft.c` `RaftLibraryInit` | `RAFT_CONFIG_AUTO_FLUSH` is `1` (upstream: `0`). Each new entry is written and fsynced, and AppendEntries are sent, immediately on the main thread, instead of being batched in `handleBeforeSleep`. |
+| `src/raft.c` `RaftLibraryInit` | `RAFT_CONFIG_AUTO_FLUSH` is `1` (upstream: `0`), to match the Raft spec: when the leader appends a client request to its log, it updates its own match index to that entry at once. Upstream RedisRaft fsyncs new entries on a background thread and counts the leader's own log toward the commit only up to the fsynced index, so the leader's commit index (and the commit index it sends in AppendEntries) can lag behind the spec's. With auto-flush, each new entry is fsynced on the main thread and the leader's match index advances immediately; AppendEntries are also sent right away instead of being batched in `handleBeforeSleep`. |
 | `deps/raft/src/raft_server.c` `raft_apply_all` | Before applying committed entries, the leader sends AppendEntries to every follower that is missing entries or has not yet been sent a message covering the newest pending read request. |
 | `CMakeLists.txt` | The default build type is `Release` (upstream: `RelWithDebInfo`). |
 | `src/redisraft.c` `clusterInit` | Uses `IID` as the node ID when `--raft.id` is not given. |
