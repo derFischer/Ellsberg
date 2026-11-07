@@ -1579,6 +1579,14 @@ void RaftLibraryInit(RedisRaftCtx *rr, bool cluster_init)
     int eltimeo = rr->config.election_timeout;
     int reqtimeo = rr->config.request_timeout;
 
+    /* Ellsberg: auto-flush is enabled (upstream: disabled) to match the Raft
+     * spec, where the leader updates its own match index as soon as it
+     * appends a client request. Without auto-flush, new entries are fsynced
+     * on a background thread and the leader counts its own log toward the
+     * commit only up to the fsynced index (handleBeforeSleep), so its commit
+     * index, and the commit index it sends in AppendEntries, can lag behind
+     * the spec's. With auto-flush, raft_recv_entry() fsyncs the entry and
+     * advances the leader's match index immediately. */
     if (raft_config(rr->raft, 1, RAFT_CONFIG_ELECTION_TIMEOUT, eltimeo) != 0 ||
         raft_config(rr->raft, 1, RAFT_CONFIG_REQUEST_TIMEOUT, reqtimeo) != 0 ||
         raft_config(rr->raft, 1, RAFT_CONFIG_AUTO_FLUSH, 1) != 0 ||
