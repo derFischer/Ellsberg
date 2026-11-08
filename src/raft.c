@@ -872,7 +872,11 @@ static int raftSendAppendEntries(raft_server_t *raft, void *user_data,
             sds *req_ids = malloc(sizeof(sds) * msg->n_entries);
             for (i = 0; i < msg->n_entries; i++) {
                 raft_entry_t *e = msg->entries[i];
-                req_ids[i] = sdsfromlonglong(e->req_id);
+                /* A non-voting entry is reported without the RAFT.NODE ADD
+                 * request id: the request completes only with the voting
+                 * entry, which carries the id (see cmdRaftNode). */
+                raft_req_id_t req_id = e->type == RAFT_LOGTYPE_ADD_NONVOTING_NODE ? 0 : e->req_id;
+                req_ids[i] = sdsfromlonglong(req_id);
             }
             joined_req_ids = sdsjoin(req_ids, msg->n_entries, ":");
             for (i = 0; i < msg->n_entries; i++) {
