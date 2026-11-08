@@ -1,0 +1,6 @@
+# binaries
+/ellsberg-etcd
+/ellsberg-redis
+/ellsberg-zk
+.vscode
+.DS_Store
